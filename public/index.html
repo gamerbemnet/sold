@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Confide — voice, video &amp; chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Auth overlay: sign in / create account -->
+  <div id="login-overlay" class="overlay hidden">
+    <div class="modal login-modal">
+      <div class="auth-logo">C</div>
+      <h2 id="auth-title">Welcome back</h2>
+      <p id="auth-sub">Sign in to continue to Confide.</p>
+
+      <div class="auth-tabs">
+        <button id="tab-login" class="auth-tab active" type="button">Sign in</button>
+        <button id="tab-signup" class="auth-tab" type="button">Create account</button>
+      </div>
+
+      <div id="auth-error" class="auth-error hidden"></div>
+
+      <input id="auth-username" type="text" maxlength="24" placeholder="Username" autocomplete="username" />
+      <input id="auth-password" type="password" maxlength="100" placeholder="Password" autocomplete="current-password" />
+      <input id="auth-password2" class="hidden" type="password" maxlength="100" placeholder="Confirm password" autocomplete="new-password" />
+
+      <button id="auth-submit" class="btn-primary">Sign in</button>
+      <p class="hint">Real-time text chat + WebRTC voice &amp; video rooms, right in your browser.</p>
+    </div>
+  </div>
+
+  <!-- Create channel modal -->
+  <div id="create-overlay" class="overlay hidden">
+    <div class="modal">
+      <h2>Create channel</h2>
+      <input id="channel-name-input" type="text" maxlength="24" placeholder="new-channel" autocomplete="off" />
+      <div class="type-toggle">
+        <button class="type-btn active" data-type="text"># Text</button>
+        <button class="type-btn" data-type="voice">&#127908; Voice</button>
+      </div>
+      <div class="modal-actions">
+        <button id="create-cancel" class="btn-ghost">Cancel</button>
+        <button id="create-btn" class="btn-primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="app">
+    <!-- Server rail -->
+    <nav class="server-rail">
+      <div class="rail-icon blurple" title="Confide">C</div>
+      <div class="rail-sep"></div>
+      <button class="rail-icon add" id="add-channel-btn" title="Create channel">+</button>
+    </nav>
+
+    <!-- Channel sidebar -->
+    <aside class="channel-sidebar">
+      <header class="sidebar-header">
+        <span id="server-name">Confide HQ</span>
+        <button id="add-channel-btn-2" class="icon-btn" title="Create channel">+</button>
+      </header>
+
+      <div class="channels-scroll">
+        <div class="channel-group">
+          <div class="group-label">Text channels</div>
+          <div id="text-channels"></div>
+        </div>
+        <div class="channel-group">
+          <div class="group-label">Voice channels</div>
+          <div id="voice-channels"></div>
+        </div>
+      </div>
+
+      <footer class="user-panel">
+        <div class="me-avatar" id="me-avatar">?</div>
+        <div class="me-info">
+          <div class="me-name" id="me-name">…</div>
+          <div class="me-status" id="me-status">Online</div>
+        </div>
+        <div class="user-controls">
+          <button id="panel-mute" class="icon-btn" title="Mute">&#127908;</button>
+          <button id="panel-deafen" class="icon-btn" title="Deafen">&#128266;</button>
+          <button id="panel-logout" class="icon-btn" title="Log out">&#8617;</button>
+        </div>
+      </footer>
+    </aside>
+
+    <!-- Main column -->
+    <main class="main">
+      <!-- Voice call panel -->
+      <section id="voice-panel" class="voice-panel hidden">
+        <div class="voice-toolbar">
+          <span id="voice-channel-label">Voice channel</span>
+          <span class="voice-live-dot"></span>
+          <span class="voice-conn" id="voice-conn">Connecting…</span>
+          <div class="spacer"></div>
+          <button id="btn-mute" class="round-btn" title="Mute microphone">&#127908;</button>
+          <button id="btn-camera" class="round-btn" title="Toggle camera">&#127909;</button>
+          <button id="btn-screen" class="round-btn" title="Share screen">&#128247;</button>
+          <button id="btn-leave" class="round-btn danger" title="Disconnect">&#128222;</button>
+        </div>
+        <div id="video-grid" class="video-grid"></div>
+      </section>
+
+      <!-- Chat -->
+      <section class="chat">
+        <header class="chat-header">
+          <span class="hash">#</span>
+          <span id="channel-title">general</span>
+          <span class="divider"></span>
+          <span id="channel-topic" class="topic"></span>
+        </header>
+
+        <div id="messages" class="messages"></div>
+
+        <div class="typing" id="typing-indicator"></div>
+
+        <div class="composer-wrap">
+          <div id="emoji-picker" class="emoji-picker hidden"></div>
+          <div class="composer">
+            <button id="emoji-btn" class="icon-btn" title="Emoji">&#128512;</button>
+            <input id="message-input" type="text" placeholder="Message #" autocomplete="off" maxlength="2000" />
+            <button id="send-btn" class="icon-btn" title="Send">&#10148;</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Members sidebar -->
+    <aside class="member-sidebar">
+      <header class="members-header">Members — <span id="member-count">0</span></header>
+      <div id="member-list" class="member-list"></div>
+    </aside>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

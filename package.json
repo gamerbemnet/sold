@@ -1,0 +1,14 @@
+{
+  "name": "discord-clone",
+  "version": "1.0.0",
+  "description": "Discord-like web app with real-time text chat and WebRTC voice/video rooms",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/protocol-test.mjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.8.1"
+  }
+}
