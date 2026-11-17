@@ -141,8 +141,9 @@ async function main() {
   check('join without token rejected through Pages', !!rejected.error, rejected.error);
 
   a.send('join', { token: li.data.token });
-  b.send('join', { token: suBob.data.token });
   const initA = await a.waitFor('init');
+  // join B only after A is registered, so B's init snapshot deterministically has 2 users
+  b.send('join', { token: suBob.data.token });
   const initB = await b.waitFor('init');
   check('join + init over websocket', Array.isArray(initA.channels) && initA.channels.length >= 5 &&
     initB.users.length === 2, `${initA.channels.length} channels, ${initB.users.length} users`);

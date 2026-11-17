@@ -84,6 +84,7 @@ async function main() {
   const aliceName = `alice-${runId}`;
   const bobName = `bob-${runId}`;
   const password = 's3cret-pass';
+  const helloText = `hello from Alice ${runId}`;
 
   async function api(route, body) {
     const res = await fetch(`http://127.0.0.1:3000${route}`, {
@@ -127,8 +128,9 @@ async function main() {
   check('join without a token is rejected', !!rejected.error, rejected.error);
 
   a.send('join', { token: liAlice.data.token }); // signed-in Alice
-  b.send('join', { token: suBob.data.token });   // just-signed-up Bob
   const initA = await a.waitFor('init');
+  // join Bob only after Alice is registered (deterministic init snapshot)
+  b.send('join', { token: suBob.data.token });   // just-signed-up Bob
   const initB = await b.waitFor('init');
   check('init payload has channels', Array.isArray(initA.channels) && initA.channels.length >= 5,
     `${initA.channels.length} channels`);
@@ -143,9 +145,9 @@ async function main() {
   const histA = await a.waitFor('text:history');
   check('history is an array', Array.isArray(histA.messages));
 
-  a.send('text:send', { channelId: general.id, text: 'hello from Alice' });
+  a.send('text:send', { channelId: general.id, text: helloText });
   const msg = await b.waitFor('text:message');
-  check('message delivered to other client', msg.text === 'hello from Alice' && msg.name === initA.me.name,
+  check('message delivered to other client', msg.text === helloText && msg.name === initA.me.name,
     `from ${msg.name}`);
 
   a.send('typing', { channelId: general.id });
@@ -153,8 +155,9 @@ async function main() {
   check('typing event relayed', typing.channelId === general.id);
 
   a.send('text:open', { channelId: general.id });
-  const histA2 = await a.waitFor('text:history', (h) => h.messages.length > 0);
-  check('message stored in history', histA2.messages.some((m) => m.text === 'hello from Alice'),
+  const histA2 = await a.waitFor('text:history',
+    (h) => h.messages.some((m) => m.text === helloText));
+  check('message stored in history', histA2.messages.some((m) => m.text === helloText),
     `${histA2.messages.length} message(s)`);
 
   /* ---------------- emoji reactions ---------------- */
