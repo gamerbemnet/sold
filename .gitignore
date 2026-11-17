@@ -8,6 +8,10 @@ data/
 *.log
 npm-debug.log*
 
+# deploy artifacts (built on demand by scripts/deploy-pages.mjs)
+bundle.zip
+pages-build/bundle.zip
+
 # editor / OS noise
 .DS_Store
 .idea/

@@ -17,6 +17,9 @@ typing indicators, and WebRTC voice/video rooms with screen sharing.
 - Text channels (`#general`, `#random`, `#help`) + create your own
 - Real-time messages over Socket.IO, message history (last 200/channel)
 - Typing indicators, day dividers, message grouping, emoji picker
+- Unread badges per channel (count + white rail indicator), auto-cleared on read
+- In-channel message search/filter, "jump to latest" with a missed-message count
+- Welcome hero at the top of each channel, hover timestamps on grouped messages
 - User list with online status, duplicate usernames auto-renamed
 
 **Voice & video rooms**
@@ -25,6 +28,8 @@ typing indicators, and WebRTC voice/video rooms with screen sharing.
 - Deafen, per-user mute badges, live connection state
 - Grid of video tiles with camera-off avatars, mirroring for local preview
 - Perfect-negotiation signaling (handles offer glare/collisions)
+- Live "speaking" highlights (Web Audio levels → green ring on the tile and
+  sidebar rows), maximize-call button, camera-off slash state
 - STUN via Google & Cloudflare for direct peer-to-peer paths, plus **TURN relay**
   (Cloudflare's global TURN network) so calls work between peers on different
   networks, NATs and countries
@@ -90,19 +95,54 @@ in the world. Notes:
 If `/api/turn` returns 503, calls still work for same-network / easy-NAT peers
 (STUN-only); strict-NAT pairs will fail until the upstream is reachable again.
 
+## Hosted deployment — https://soldchats.pages.dev
+
+The app is deployed on **Cloudflare Pages** behind a stable URL:
+
+- **Static UI** (HTML/CSS/JS) is served directly from Pages' global edge.
+- **`pages-build/_worker.js`** (Pages advanced-mode Worker) proxies `/api/*`
+  and `/socket.io/*` — including WebSocket upgrades — to the origin server, so
+  auth, chat, typing and voice signaling run in real time through `pages.dev`.
+- The origin URL lives in the Pages environment variable **`ORIGIN`**, so when
+  the cloudflared tunnel restarts with a new address you only update the
+  variable and redeploy — no code changes:
+
+```bash
+CF_TOKEN=<pages api token> \
+CF_ACCOUNT=<account id> \
+ORIGIN=https://<current-tunnel-url> \
+node scripts/deploy-pages.mjs
+```
+
+The token needs **Account · Cloudflare Pages · Edit**. The script replicates
+what `wrangler pages deploy` does (BLAKE3 asset hashing → upload → deployment)
+without requiring npm, and it verifies the `ORIGIN` env var before deploying —
+Pages binds environment variables **at deploy time**, so the redeploy in the
+same run is what makes the new origin take effect.
+
+- Media (WebRTC) never touches Pages: peers connect directly or through TURN,
+  so call quality doesn't depend on the origin server.
+- GitHub source: <https://github.com/gamerbemnet/sold-remake>
+
 ## Test
 
 ```bash
 node test/protocol-test.mjs    # or: npm test
+node test/pages-e2e.mjs        # end-to-end test of the deployed Pages site
 ```
 
-17-check end-to-end test over raw Socket.IO/WebSocket, plus auth checks
-(23 total).
+23-check end-to-end test over raw Socket.IO/WebSocket, including auth
+(signup, duplicate username, wrong password, login, tokenless-join rejection).
 
 Covers: signup/login/logout (incl. duplicate username, wrong password, and
 tokenless-join rejection), connect, join/init, message delivery & history,
 typing, channel creation, voice join/peer discovery, SDP & ICE relay, voice
 state broadcast, leave and disconnect handling.
+
+`test/pages-e2e.mjs` re-runs the critical path through the public URL (14
+checks): static serving, worker proxy (auth API + TURN credentials),
+WebSocket transport through Pages, message/typing relay and WebRTC signaling
+relay — proving the hosted deployment end to end.
 
 TURN diagnostics (require network access):
 
@@ -119,8 +159,11 @@ server.js          Express + Socket.IO server: accounts & sessions, channels,
 public/index.html  UI structure (auth screen, server rail, sidebar, chat, voice panel, members)
 public/style.css   Discord-like dark theme
 public/app.js      Client: auth flow, chat rendering, WebRTC peers, media controls, ICE refresh
+pages-build/_worker.js  Pages advanced-mode worker: proxies /api + /socket.io to the ORIGIN env var
+scripts/deploy-pages.mjs  Deploy to Cloudflare Pages (hash + upload + ORIGIN env + deployment)
 data/accounts.json Persisted credentials + session tokens (created on first signup)
 test/protocol-test.mjs  End-to-end protocol test (no extra deps)
+test/pages-e2e.mjs  End-to-end test of the deployed Pages site (HTTP + WebSocket)
 test/turn-cloudflare.cjs  Verifies Cloudflare TURN allocation end-to-end
 ```
 
