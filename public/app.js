@@ -106,6 +106,47 @@ function fmtDay(ts) {
   return d.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+/* human date phrasing: "Today at 2:41 PM" */
+function fmtFull(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const yest = new Date(now.getTime() - 86400000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `Today at ${time}`;
+  if (d.toDateString() === yest.toDateString()) return `Yesterday at ${time}`;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${time}`;
+}
+
+/* soft two-tone avatar gradients instead of flat blocks of color */
+function shade(hex, amt) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const parts = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) =>
+    Math.max(0, Math.min(255, Math.round(v + amt))));
+  return `#${parts.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+function gradientFor(color) {
+  return `linear-gradient(140deg, ${shade(color, 42)} 0%, ${color} 55%, ${shade(color, -30)} 100%)`;
+}
+
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '😮'];
+
+function reactionsHtml(reactions) {
+  const entries = Object.entries(reactions || {});
+  if (!entries.length) return '';
+  return '<div class="msg-reactions">' + entries.map(([emoji, voters]) =>
+    `<button type="button" class="reaction${voters.includes(socket.id) ? ' mine' : ''}"` +
+    ` data-emoji="${emoji}" title="${voters.length} reaction${voters.length === 1 ? '' : 's'}">` +
+    `<span class="r-emoji">${emoji}</span><span class="r-count">${voters.length}</span></button>`
+  ).join('') + '</div>';
+}
+
+const reactionsBarHtml =
+  '<div class="msg-actions">' +
+  REACTION_EMOJIS.map((e) => `<button type="button" class="msg-act" data-emoji="${e}" title="React with ${e}">${e}</button>`).join('') +
+  '</div>';
+
 const channelById = (id) => state.channels.find((c) => c.id === id);
 const participantById = (id) => state.participants.find((p) => p.id === id);
 
@@ -155,9 +196,11 @@ function setAuthMode(mode) {
   authMode = mode;
   $('tab-login').classList.toggle('active', mode === 'login');
   $('tab-signup').classList.toggle('active', mode === 'signup');
-  $('auth-title').textContent = mode === 'login' ? 'Welcome back' : 'Create your account';
+  $('auth-title').textContent = mode === 'login' ? 'Good to see you again' : 'Make yourself at home';
   $('auth-sub').textContent =
-    mode === 'login' ? 'Sign in to continue to Sold.' : 'Pick a username and password to get started.';
+    mode === 'login'
+      ? 'Your people are already here. Jump back in.'
+      : "Pick a name — it's how people will find you.";
   $('auth-submit').textContent = mode === 'login' ? 'Sign in' : 'Create account';
   $('auth-password2').classList.toggle('hidden', mode !== 'signup');
   $('auth-password').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
@@ -286,7 +329,7 @@ socket.on('init', (data) => {
   renderChannels();
   renderMembers();
   $('me-avatar').textContent = initial(data.me.name);
-  $('me-avatar').style.background = data.me.color;
+  $('me-avatar').style.background = gradientFor(data.me.color);
   $('me-name').textContent = data.me.name;
   $('me-status').textContent = 'Online';
   if (!state.activeText || !channelById(state.activeText)) {
@@ -326,6 +369,18 @@ socket.on('text:message', (msg) => {
     unreadMap.set(msg.channelId, (unreadMap.get(msg.channelId) || 0) + 1);
     renderChannels();
   }
+});
+
+socket.on('text:reaction', ({ channelId, messageId, reactions }) => {
+  if (channelId !== state.activeText) return;
+  const group = document.querySelector(`#messages .msg-group[data-id="${messageId}"]`);
+  if (!group) return;
+  const body = group.querySelector('.msg-body');
+  if (!body) return;
+  const old = body.querySelector('.msg-reactions');
+  if (old) old.remove();
+  const html = reactionsHtml(reactions);
+  if (html) body.insertAdjacentHTML('beforeend', html);
 });
 
 socket.on('typing', ({ channelId, userId, name }) => {
@@ -461,13 +516,17 @@ function renderHistory(messages) {
   // welcome hero, like the top of a fresh Discord channel
   const ch = channelById(state.activeText);
   if (ch) {
+    const people = state.users.length;
+    const human = people > 1
+      ? `${people} people are hanging out here right now.`
+      : `It's just you here right now — invite a friend?`;
     const hero = document.createElement('div');
     hero.className = 'msg-hero';
     hero.innerHTML =
       `<div class="hero-icon">#</div>` +
       `<h2>Welcome to #${escapeHtml(ch.name)}!</h2>` +
-      `<p>This is the start of the <b>#${escapeHtml(ch.name)}</b> channel.` +
-      (ch.topic ? ` ${escapeHtml(ch.topic)}` : '') + `</p>`;
+      `<p class="hero-topic">${ch.topic ? escapeHtml(ch.topic) + ' — ' : ''}${human}</p>` +
+      (messages.length ? '' : `<p class="hero-quiet">It's quiet in here. Be the first to say hi 👋</p>`);
     wrap.appendChild(hero);
   }
 
@@ -517,6 +576,7 @@ function buildMessage(msg, last) {
     last && last.userId === msg.userId && msg.ts - last.ts < 5 * 60 * 1000;
   const el = document.createElement('div');
   el.className = 'msg-group' + (grouped ? ' cont' : '');
+  el.dataset.id = msg.id;
   el.dataset.userId = msg.userId;
   el.dataset.ts = msg.ts;
   el.dataset.author = msg.name;
@@ -526,12 +586,15 @@ function buildMessage(msg, last) {
   const hoverTime = grouped
     ? `<div class="msg-hover-time">${fmtTime(msg.ts)}</div>`
     : '';
-  const avatar = `<div class="msg-avatar" style="background:${msg.color}">${initial(msg.name)}</div>`;
+  const avatar = `<div class="msg-avatar" style="background:${gradientFor(msg.color)}">${initial(msg.name)}</div>`;
   const meta = `<div class="msg-meta"><span class="msg-author">${escapeHtml(msg.name)}</span>` +
-    `<span class="msg-time">${fmtTime(msg.ts)}</span></div>`;
+    `<span class="msg-time">${fmtFull(msg.ts)}</span></div>`;
   const text = `<div class="msg-text">${escapeHtml(msg.text)}</div>`;
 
-  el.innerHTML = `${hoverTime}${avatar}<div class="msg-body">${meta}${text}</div>`;
+  el.innerHTML =
+    `${hoverTime}${avatar}` +
+    `<div class="msg-body">${meta}${text}${reactionsHtml(msg.reactions)}</div>` +
+    reactionsBarHtml;
   if (grouped) el.classList.add('cont');
   return el;
 }
@@ -620,7 +683,8 @@ function renderTyping() {
     names.length === 1
       ? `<b>${escapeHtml(names[0])}</b> is typing…`
       : `<b>${escapeHtml(names.slice(0, 3).join(', '))}</b> are typing…`;
-  $('typing-indicator').innerHTML = label;
+  $('typing-indicator').innerHTML =
+    `<span class="typing-dots"><i></i><i></i><i></i></span>${label}`;
 }
 
 /* composer */
@@ -673,6 +737,19 @@ document.addEventListener('click', (e) => {
   }
 });
 
+/* reactions: hover bar + existing chips (delegated so re-renders just work) */
+$('messages').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-emoji]');
+  if (!btn || !state.activeText) return;
+  const group = btn.closest('.msg-group');
+  if (!group || !group.dataset.id) return;
+  socket.emit('text:react', {
+    channelId: state.activeText,
+    messageId: Number(group.dataset.id),
+    emoji: btn.dataset.emoji,
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /* Members                                                             */
 /* ------------------------------------------------------------------ */
@@ -698,7 +775,7 @@ function renderMembers() {
       (speakingSet.has(u.id) ? ' speaking' : '');
     el.dataset.id = u.id;
     el.innerHTML =
-      `<div class="member-avatar" style="background:${u.color}">${initial(u.name)}` +
+      `<div class="member-avatar" style="background:${gradientFor(u.color)}">${initial(u.name)}` +
       `<span class="status-dot"></span></div>` +
       `<div class="member-name">${escapeHtml(u.name)}${u.id === socket.id ? ' (you)' : ''}</div>` +
       (inVoice.has(u.id) ? `<div class="member-voice-tag">&#128172; voice</div>` : '');
@@ -883,7 +960,7 @@ async function joinVoice(channelId) {
     });
   } catch (err) {
     voice.localStream = null;
-    toast('Microphone unavailable — joined in listen-only mode');
+    toast('No mic? No problem — you joined in listen-only mode.');
   }
   if (voice.localStream) monitorStream(socket.id, voice.localStream);
 
@@ -1086,7 +1163,7 @@ async function toggleCamera() {
     updateControls();
     updateTilesFromState();
   } catch (err) {
-    toast('Camera unavailable or permission denied');
+    toast("Couldn't reach your camera — check permissions?", 'error');
   }
 }
 
@@ -1103,7 +1180,7 @@ async function toggleScreen() {
     updateControls();
     updateTilesFromState();
   } catch (err) {
-    if (err && err.name !== 'NotAllowedError') toast('Screen share failed');
+    if (err && err.name !== 'NotAllowedError') toast("Screen share didn't start — want to try again?", 'error');
   }
 }
 
@@ -1214,9 +1291,9 @@ function updateConnLabel() {
   if (!voice.channel) return;
   const total = state.participants.filter((p) => p.channel === voice.channel).length;
   const connected = [...voice.peers.values()].filter((p) => p.connected).length;
-  if (!voice.peers.size) el.textContent = `Connected — waiting for others (${total} in channel)`;
-  else if (connected === voice.peers.size) el.textContent = `Connected — ${connected + 1} in call`;
-  else el.textContent = `Connecting… ${connected}/${voice.peers.size} peers`;
+  if (!voice.peers.size) el.textContent = `You're in — waiting for the others (${total} here)`;
+  else if (connected === voice.peers.size) el.textContent = `You're in the call — ${connected + 1} people`;
+  else el.textContent = `Connecting… ${connected} of ${voice.peers.size} connected`;
 }
 
 /* ---------------- tiles ---------------- */
@@ -1233,7 +1310,7 @@ function ensureTile(id, name, color) {
   tile.dataset.name = name;
   tile.innerHTML =
     `<video autoplay playsinline style="opacity:0"></video>` +
-    `<div class="tile-fallback"><div class="tf-avatar" style="background:${color}">${initial(name)}</div></div>` +
+    `<div class="tile-fallback"><div class="tf-avatar" style="background:${gradientFor(color)}">${initial(name)}</div></div>` +
     `<div class="tile-name">${escapeHtml(name)}</div>` +
     `<div class="tile-badge" style="display:none">connecting…</div>`;
   $('video-grid').appendChild(tile);
@@ -1249,7 +1326,7 @@ function renderLocalTile() {
   tile.dataset.name = state.me ? state.me.name : 'You';
   tile.innerHTML =
     `<video autoplay playsinline muted class="mirrored" style="opacity:0"></video>` +
-    `<div class="tile-fallback"><div class="tf-avatar" style="background:${state.me ? state.me.color : '#5865f2'}">` +
+    `<div class="tile-fallback"><div class="tf-avatar" style="background:${gradientFor(state.me ? state.me.color : '#5865f2')}">` +
     `${initial(state.me && state.me.name)}</div></div>` +
     `<div class="tile-name">You</div>`;
   $('video-grid').appendChild(tile);

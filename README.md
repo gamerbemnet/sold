@@ -18,7 +18,8 @@ typing indicators, and WebRTC voice/video rooms with screen sharing.
 **Text chat**
 - Text channels (`#general`, `#random`, `#help`) + create your own
 - Real-time messages over Socket.IO, message history (last 200/channel)
-- Typing indicators, day dividers, message grouping, emoji picker
+- Typing indicators (animated dots), day dividers, message grouping, emoji picker
+- Emoji reactions (👍 ❤️ 😂 🎉 🔥 😮) with live counts, toggle on/off, persisted
 - Unread badges per channel (count + white rail indicator), auto-cleared on read
 - In-channel message search/filter, "jump to latest" with a missed-message count
 - Welcome hero at the top of each channel, hover timestamps on grouped messages
@@ -133,18 +134,18 @@ node test/protocol-test.mjs    # or: npm test
 node test/pages-e2e.mjs        # end-to-end test of the deployed Pages site
 ```
 
-23-check end-to-end test over raw Socket.IO/WebSocket, including auth
+25-check end-to-end test over raw Socket.IO/WebSocket, including auth
 (signup, duplicate username, wrong password, login, tokenless-join rejection).
 
 Covers: signup/login/logout (incl. duplicate username, wrong password, and
 tokenless-join rejection), connect, join/init, message delivery & history,
-typing, channel creation, voice join/peer discovery, SDP & ICE relay, voice
-state broadcast, leave and disconnect handling.
+typing, emoji reactions (add + toggle off), channel creation, voice join/peer
+discovery, SDP & ICE relay, voice state broadcast, leave and disconnect handling.
 
-`test/pages-e2e.mjs` re-runs the critical path through the public URL (14
+`test/pages-e2e.mjs` re-runs the critical path through the public URL (15
 checks): static serving, worker proxy (auth API + TURN credentials),
-WebSocket transport through Pages, message/typing relay and WebRTC signaling
-relay — proving the hosted deployment end to end.
+WebSocket transport through Pages, message/typing/reaction relay and WebRTC
+signaling relay — proving the hosted deployment end to end.
 
 TURN diagnostics (require network access):
 

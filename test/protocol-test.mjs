@@ -157,6 +157,18 @@ async function main() {
   check('message stored in history', histA2.messages.some((m) => m.text === 'hello from Alice'),
     `${histA2.messages.length} message(s)`);
 
+  /* ---------------- emoji reactions ---------------- */
+  b.send('text:react', { channelId: general.id, messageId: msg.id, emoji: '👍' });
+  const reactOn = await a.waitFor('text:reaction', (r) => r.messageId === msg.id);
+  check('reaction broadcast to everyone', (reactOn.reactions['👍'] || []).length === 1,
+    JSON.stringify(reactOn.reactions));
+
+  b.send('text:react', { channelId: general.id, messageId: msg.id, emoji: '👍' });
+  const reactOff = await a.waitFor('text:reaction',
+    (r) => r.messageId === msg.id && !r.reactions['👍']);
+  check('reaction toggled off by the same user', !reactOff.reactions['👍'],
+    JSON.stringify(reactOff.reactions));
+
   /* ---------------- channel creation ---------------- */
   const suffix = Date.now().toString(36);
   const wanted = `my-new-room-${suffix}`;
@@ -169,7 +181,8 @@ async function main() {
   /* ---------------- voice join + relay ---------------- */
   const lobby = initA.channels.find((c) => c.type === 'voice');
   a.send('voice:join', { channelId: lobby.id });
-  await a.waitFor('voice:update');
+  // wait until *A* is actually registered in the room (not just any update)
+  await a.waitFor('voice:update', (u) => u.some((p) => p.id === initA.me.id));
   b.send('voice:join', { channelId: lobby.id });
   const peers = await b.waitFor('voice:peers');
   check('joiner is told existing peers', peers.peers.some((p) => p.id === initA.me.id),

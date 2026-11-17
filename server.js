@@ -214,7 +214,7 @@ function authRateLimited(ip) {
   return entry.count > 30;
 }
 
-const publicAccount = (a) => ({ username: a.username, color: a.color });
+const publicAccount = (a) => ({ username: a.username, color: a.color, createdAt: a.createdAt });
 
 app.post('/api/signup', (req, res) => {
   if (authRateLimited(req.ip || 'unknown')) {
@@ -225,15 +225,15 @@ app.post('/api/signup', (req, res) => {
 
   if (!USERNAME_RE.test(username)) {
     return res.status(400).json({
-      error: 'Username must be 3–24 characters: letters, numbers, _ . -',
+      error: 'Usernames are 3–24 characters: letters, numbers, and _ . -',
     });
   }
   if (password.length < 6 || password.length > 100) {
-    return res.status(400).json({ error: 'Password must be 6–100 characters.' });
+    return res.status(400).json({ error: 'Passwords need at least 6 characters.' });
   }
   const key = username.toLowerCase();
   if (accounts.has(key)) {
-    return res.status(409).json({ error: 'That username is already taken.' });
+    return res.status(409).json({ error: "That name's already taken — try another?" });
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
@@ -259,7 +259,7 @@ app.post('/api/login', (req, res) => {
 
   const account = accounts.get(username.toLowerCase());
   if (!account || !verifyPassword(password, account)) {
-    return res.status(401).json({ error: 'Incorrect username or password.' });
+    return res.status(401).json({ error: "Hmm, that username or password doesn't look right." });
   }
   const token = createSession(account.username);
   res.json({ token, user: publicAccount(account) });
@@ -284,7 +284,7 @@ io.on('connection', (socket) => {
 
     const account = sessionUser(payload.token);
     if (!account) {
-      socket.emit('join:error', { error: 'Not signed in — please log in again.' });
+      socket.emit('join:error', { error: 'Looks like your session expired — please log in again.' });
       return;
     }
 
@@ -340,10 +340,33 @@ io.on('connection', (socket) => {
       name: user.name,
       color: user.color,
       text,
+      reactions: {},
       ts: Date.now(),
     };
     pushHistory(channelId, msg);
     io.emit('text:message', msg);
+  });
+
+  /* emoji reactions — toggle on/off, broadcast the fresh counts */
+  const ALLOWED_REACTIONS = new Set(['👍', '❤️', '😂', '🎉', '😮', '🔥']);
+
+  socket.on('text:react', ({ channelId, messageId, emoji } = {}) => {
+    const user = users.get(socket.id);
+    if (!user || !ALLOWED_REACTIONS.has(emoji)) return;
+    const list = history.get(channelId);
+    if (!list) return;
+    const msg = list.find((m) => m.id === Number(messageId));
+    if (!msg) return;
+
+    if (!msg.reactions) msg.reactions = {};
+    const voters = msg.reactions[emoji] || [];
+    const i = voters.indexOf(user.id);
+    if (i >= 0) voters.splice(i, 1);
+    else voters.push(user.id);
+    if (voters.length) msg.reactions[emoji] = voters;
+    else delete msg.reactions[emoji];
+
+    io.emit('text:reaction', { channelId, messageId: msg.id, reactions: msg.reactions });
   });
 
   socket.on('typing', ({ channelId } = {}) => {
@@ -428,5 +451,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Discord-clone running at http://localhost:${PORT}`);
+  console.log(`Sold running at http://localhost:${PORT}`);
 });

@@ -80,6 +80,7 @@ async function main() {
   console.log(`target: ${BASE}\n`);
   const runId = Date.now().toString(36);
   const aliceName = `alice-${runId}`;
+  const bobName = `bob-${runId}`;
   const password = 's3cret-pass';
 
   async function api(route, body) {
@@ -125,6 +126,9 @@ async function main() {
   const li = await api('/api/login', { username: aliceName, password });
   check('login through Pages', li.status === 200 && !!li.data.token, `status=${li.status}`);
 
+  // second, distinct account for peer B — same-account tabs get renamed ("name 2")
+  const suBob = await api('/api/signup', { username: bobName, password });
+
   /* ---------------- websocket transport ----------------------------------- */
   const a = new Client('A');
   const b = new Client('B');
@@ -137,7 +141,7 @@ async function main() {
   check('join without token rejected through Pages', !!rejected.error, rejected.error);
 
   a.send('join', { token: li.data.token });
-  b.send('join', { token: su.data.token });
+  b.send('join', { token: suBob.data.token });
   const initA = await a.waitFor('init');
   const initB = await b.waitFor('init');
   check('join + init over websocket', Array.isArray(initA.channels) && initA.channels.length >= 5 &&
@@ -154,10 +158,16 @@ async function main() {
   const typing = await b.waitFor('typing');
   check('typing relayed through Pages', typing.channelId === general.id);
 
+  b.send('text:react', { channelId: general.id, messageId: msg.id, emoji: '🎉' });
+  const react = await a.waitFor('text:reaction', (r) => r.messageId === msg.id);
+  check('emoji reaction relayed through Pages', (react.reactions['🎉'] || []).length === 1,
+    JSON.stringify(react.reactions));
+
   /* ---------------- voice signaling (WebRTC relay path) -------------------- */
   const lobby = initA.channels.find((c) => c.type === 'voice');
   a.send('voice:join', { channelId: lobby.id });
-  await a.waitFor('voice:update');
+  // wait until *A* is actually registered in the room (not just any update)
+  await a.waitFor('voice:update', (u) => u.some((p) => p.id === initA.me.id));
   b.send('voice:join', { channelId: lobby.id });
   const peers = await b.waitFor('voice:peers');
   check('voice join relayed (peer discovery)', peers.peers.some((p) => p.id === initA.me.id),
