@@ -97,7 +97,7 @@ in the world. Notes:
 If `/api/turn` returns 503, calls still work for same-network / easy-NAT peers
 (STUN-only); strict-NAT pairs will fail until the upstream is reachable again.
 
-## Hosted deployment — https://sold-3e0.pages.dev
+## Hosted deployment — https://soldchats.pages.dev
 
 The app is deployed on **Cloudflare Pages** behind a stable URL:
 

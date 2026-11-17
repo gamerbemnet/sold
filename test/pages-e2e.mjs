@@ -5,7 +5,7 @@
  * Run: node test/pages-e2e.mjs [https://<project>.pages.dev]
  */
 
-const BASE = (process.argv[2] || process.env.PAGES_URL || 'https://sold-3e0.pages.dev').replace(/\/+$/, '');
+const BASE = (process.argv[2] || process.env.PAGES_URL || 'https://soldchats.pages.dev').replace(/\/+$/, '');
 const WS_BASE = BASE.replace(/^http/, 'ws');
 const WS_URL = `${WS_BASE}/socket.io/?EIO=4&transport=websocket`;
 
