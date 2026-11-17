@@ -1,5 +1,5 @@
 /* ================================================================== */
-/* Confide — Discord-like client: real-time chat + WebRTC voice/video  */
+/* Sold — Discord-like client: real-time chat + WebRTC voice/video  */
 /* ================================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -113,7 +113,19 @@ const participantById = (id) => state.participants.find((p) => p.id === id);
 /* Auth: sign in / create account                                       */
 /* ------------------------------------------------------------------ */
 
-const TOKEN_KEY = 'confide-token';
+const TOKEN_KEY = 'sold-token';
+
+// migrate storage keys from the pre-rename ('confide-*') era so existing
+// sessions and preferences survive the rename
+try {
+  [['confide-token', 'sold-token'],
+   ['confide-username', 'sold-username'],
+   ['confide-members-hidden', 'sold-members-hidden']].forEach(([from, to]) => {
+    const v = localStorage.getItem(from);
+    if (v !== null && localStorage.getItem(to) === null) localStorage.setItem(to, v);
+    localStorage.removeItem(from);
+  });
+} catch (_) {}
 
 let authMode = 'login'; // 'login' | 'signup'
 
@@ -145,7 +157,7 @@ function setAuthMode(mode) {
   $('tab-signup').classList.toggle('active', mode === 'signup');
   $('auth-title').textContent = mode === 'login' ? 'Welcome back' : 'Create your account';
   $('auth-sub').textContent =
-    mode === 'login' ? 'Sign in to continue to Confide.' : 'Pick a username and password to get started.';
+    mode === 'login' ? 'Sign in to continue to Sold.' : 'Pick a username and password to get started.';
   $('auth-submit').textContent = mode === 'login' ? 'Sign in' : 'Create account';
   $('auth-password2').classList.toggle('hidden', mode !== 'signup');
   $('auth-password').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
@@ -179,13 +191,13 @@ async function submitAuth() {
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
 
     localStorage.setItem(TOKEN_KEY, data.token);
-    localStorage.setItem('confide-username', data.user.username);
+    localStorage.setItem('sold-username', data.user.username);
     $('auth-password').value = '';
     $('auth-password2').value = '';
     $('login-overlay').classList.add('hidden');
     setAuthError('');
     joinWithToken(data.token);
-    if (authMode === 'signup') toast(`Welcome to Confide, ${data.user.username}!`, 'success');
+    if (authMode === 'signup') toast(`Welcome to Sold, ${data.user.username}!`, 'success');
     else toast(`Welcome back, ${data.user.username}!`, 'success');
   } catch (err) {
     setAuthError(err.message);
@@ -1182,11 +1194,11 @@ $('btn-expand').addEventListener('click', () => {
 $('toggle-members').addEventListener('click', () => {
   const app = document.querySelector('.app');
   const hidden = app.classList.toggle('members-hidden');
-  try { localStorage.setItem('confide-members-hidden', hidden ? '1' : '0'); } catch (_) {}
+  try { localStorage.setItem('sold-members-hidden', hidden ? '1' : '0'); } catch (_) {}
   $('toggle-members').classList.toggle('on', !hidden);
 });
 try {
-  if (localStorage.getItem('confide-members-hidden') === '1') {
+  if (localStorage.getItem('sold-members-hidden') === '1') {
     document.querySelector('.app').classList.add('members-hidden');
     $('toggle-members').classList.remove('on');
   }
@@ -1306,7 +1318,7 @@ document.addEventListener('keydown', (e) => {
 
 // pre-fill the username field from the last successful sign-in
 try {
-  const lastUser = localStorage.getItem('confide-username');
+  const lastUser = localStorage.getItem('sold-username');
   if (lastUser) $('auth-username').value = lastUser;
 } catch (_) {}
 setAuthMode('login');

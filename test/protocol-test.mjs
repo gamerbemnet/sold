@@ -1,4 +1,4 @@
-/* Functional test for the Confide server using raw Engine.IO/Socket.IO
+/* Functional test for the Sold server using raw Engine.IO/Socket.IO
  * protocol over Node's built-in WebSocket (no extra dependencies).
  *
  * Run: node test/protocol-test.mjs

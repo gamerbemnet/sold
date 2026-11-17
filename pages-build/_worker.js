@@ -1,4 +1,4 @@
-/* sold.pages.dev — Cloudflare Pages advanced-mode Worker.
+/* sold-3e0.pages.dev — Cloudflare Pages advanced-mode Worker.
  *
  * The Node/Socket.IO server cannot run on Pages, so this Worker splits traffic:
  *   - /api/* and /socket.io/*  → proxied to the live origin (cloudflared tunnel),

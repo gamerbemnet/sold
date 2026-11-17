@@ -5,7 +5,7 @@
  * Run: node test/pages-e2e.mjs [https://<project>.pages.dev]
  */
 
-const BASE = (process.argv[2] || process.env.PAGES_URL || 'https://soldchats.pages.dev').replace(/\/+$/, '');
+const BASE = (process.argv[2] || process.env.PAGES_URL || 'https://sold-3e0.pages.dev').replace(/\/+$/, '');
 const WS_BASE = BASE.replace(/^http/, 'ws');
 const WS_URL = `${WS_BASE}/socket.io/?EIO=4&transport=websocket`;
 
@@ -96,7 +96,7 @@ async function main() {
   /* ---------------- static assets (served by Pages, not the origin) ------- */
   const idx = await fetch(`${BASE}/`);
   const html = await idx.text().catch(() => '');
-  check('home page serves', idx.status === 200 && html.includes('Confide'),
+  check('home page serves', idx.status === 200 && html.includes('Sold'),
     `status=${idx.status}`);
 
   const css = await fetch(`${BASE}/style.css`);

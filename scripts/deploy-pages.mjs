@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Deploy the Confide UI + proxy worker to Cloudflare Pages.
+ * Deploy the Sold UI + proxy worker to Cloudflare Pages.
  *
  * Replicates what `wrangler pages deploy` does against the Pages API, without
  * needing wrangler/npm:
@@ -13,7 +13,7 @@
  * Usage:
  *   CF_TOKEN=<pages api token> \
  *   CF_ACCOUNT=<account id> \
- *   CF_PROJECT=soldchats \
+ *   CF_PROJECT=sold \
  *   ORIGIN=https://<current-tunnel-url> \
  *   node scripts/deploy-pages.mjs
  *
@@ -33,7 +33,7 @@ const b3 = require(process.env.BLAKE3_PATH || '/tmp/b3/package');
 const API = 'https://api.cloudflare.com/client/v4';
 const CF_TOKEN = process.env.CF_TOKEN;
 const CF_ACCOUNT = process.env.CF_ACCOUNT;
-const CF_PROJECT = process.env.CF_PROJECT || 'soldchats';
+const CF_PROJECT = process.env.CF_PROJECT || 'sold';
 const ORIGIN = (process.env.ORIGIN || '').replace(/\/+$/, '');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

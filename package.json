@@ -1,7 +1,7 @@
 {
-  "name": "discord-clone",
+  "name": "sold",
   "version": "1.0.0",
-  "description": "Discord-like web app with real-time text chat and WebRTC voice/video rooms",
+  "description": "Sold — Discord-like web app with real-time text chat and WebRTC voice/video rooms",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -1,4 +1,6 @@
-# Confide — Discord-style chat with real-time calling
+# Sold — Discord-style chat with real-time calling
+
+*(formerly "Confide"; GitHub repo `sold`, hosted on Cloudflare Pages)*
 
 A browser-based Discord clone: server/channel sidebar, real-time text chat with
 typing indicators, and WebRTC voice/video rooms with screen sharing.
@@ -95,7 +97,7 @@ in the world. Notes:
 If `/api/turn` returns 503, calls still work for same-network / easy-NAT peers
 (STUN-only); strict-NAT pairs will fail until the upstream is reachable again.
 
-## Hosted deployment — https://soldchats.pages.dev
+## Hosted deployment — https://sold-3e0.pages.dev
 
 The app is deployed on **Cloudflare Pages** behind a stable URL:
 
@@ -122,7 +124,7 @@ same run is what makes the new origin take effect.
 
 - Media (WebRTC) never touches Pages: peers connect directly or through TURN,
   so call quality doesn't depend on the origin server.
-- GitHub source: <https://github.com/gamerbemnet/sold-remake>
+- GitHub source: <https://github.com/gamerbemnet/sold>
 
 ## Test
 
