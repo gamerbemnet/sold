@@ -324,6 +324,89 @@ async function main() {
     !m.has('voice:peers') && !a.has('voice:update', (u) => u.some((p) => p.id === initM.me.id)),
     'voice join blocked');
 
+  /* ---------------- friends + DMs ---------------- */
+  const dmKey = `dm:${[aliceName.toLowerCase(), bobName.toLowerCase()].sort().join('::')}`;
+
+  m.send('text:open', { channelId: dmKey });
+  m.send('text:send', { channelId: dmKey, text: 'let me in' });
+  await silence(700);
+  check('non-friend cannot open or post into the DM',
+    !m.has('text:history')
+    && !a.has('text:message', (x) => x.text === 'let me in')
+    && !b.has('text:message', (x) => x.text === 'let me in'),
+    'blocked before friendship');
+
+  const fr = await api('/api/friends/request', { token: liAlice.data.token, username: bobName });
+  check('friend request returns requested + outgoing shows up',
+    fr.status === 200 && fr.data.status === 'requested'
+    && fr.data.friends.outgoing.some((r) => r.username === bobName.toLowerCase()),
+    `status=${fr.status}`);
+
+  const bobIncoming = await b.waitFor('friends', (f) => f.incoming.length === 1);
+  check('requested user gets a friends push with the incoming request',
+    bobIncoming.incoming[0].username === aliceName.toLowerCase(),
+    JSON.stringify(bobIncoming.incoming));
+
+  const dupFr = await api('/api/friends/request', { token: liAlice.data.token, username: bobName });
+  check('duplicate request is rejected', dupFr.status === 409, `status=${dupFr.status}`);
+
+  const respond = await api('/api/friends/respond', { token: suBob.data.token, username: aliceName, accept: true });
+  check('accepting makes both sides friends',
+    respond.status === 200 && respond.data.friends.friends.some((f) => f.username === aliceName.toLowerCase()),
+    `status=${respond.status}`);
+
+  await a.waitFor('friends', (f) => f.friends.length === 1);
+  check('requester gets friends push on accept', a.has('friends', (f) => f.friends.length === 1));
+
+  a.send('text:open', { channelId: dmKey });
+  const dmHist = await a.waitFor('text:history', (h) => h.channelId === dmKey);
+  check('DM thread opens with history', Array.isArray(dmHist.messages), `${dmHist.messages.length} msgs`);
+
+  a.send('text:send', { channelId: dmKey, text: `dm hello ${runId}` });
+  const dmMsg = await b.waitFor('text:message', (x) => x.channelId === dmKey);
+  check('DM delivered to the friend', dmMsg.text === `dm hello ${runId}`);
+
+  b.send('typing', { channelId: dmKey });
+  const dmTyping = await a.waitFor('typing', (t) => t.channelId === dmKey);
+  check('typing relayed inside the DM', dmTyping.name === initB.me.name);
+
+  b.send('text:react', { channelId: dmKey, messageId: dmMsg.id, emoji: '👍' });
+  const dmReact = await a.waitFor('text:reaction', (r) => r.channelId === dmKey && r.messageId === dmMsg.id);
+  check('reactions work in DMs', (dmReact.reactions['👍'] || []).length === 1,
+    JSON.stringify(dmReact.reactions));
+
+  m.send('text:react', { channelId: dmKey, messageId: dmMsg.id, emoji: '😂' });
+  await silence(700);
+  check('non-friend cannot react in the DM',
+    !a.has('text:reaction', (r) => r.messageId === dmMsg.id && r.reactions['😂']),
+    'reaction blocked');
+
+  await a.waitFor('dms', (l) => l.some((d) => d.key === dmKey));
+  check('DM summaries pushed after a message', a.has('dms', (l) => l.some((d) => d.key === dmKey)));
+
+  check('dms.json persisted with the thread',
+    (() => {
+      try {
+        const saved = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'dms.json'), 'utf8'));
+        return !!(saved.threads && saved.threads[dmKey]);
+      } catch (_) { return false; }
+    })());
+
+  const remove = await api('/api/friends/remove', { token: liAlice.data.token, username: bobName });
+  check('unfriend succeeds', remove.status === 200 && remove.data.ok, `status=${remove.status}`);
+
+  await silence(400);
+  b.send('text:open', { channelId: dmKey });
+  await silence(700);
+  check('after unfriend the DM is locked again',
+    !b.has('text:history', (h) => h.channelId === dmKey), 'dm closed');
+
+  const reRequest = await api('/api/friends/request', { token: liAlice.data.token, username: bobName });
+  await api('/api/friends/respond', { token: suBob.data.token, username: aliceName, accept: true });
+  check('re-friending works after removal',
+    reRequest.status === 200 && reRequest.data.status === 'requested',
+    `status=${reRequest.status}`);
+
   /* ---------------- leave + rejoin ---------------- */
   b.send('voice:leave');
   const leave = await a.waitFor('voice:leave');

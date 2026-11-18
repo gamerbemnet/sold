@@ -104,45 +104,22 @@ const lower = (v) => String(v || '').toLowerCase();
 const genInvite = () => crypto.randomBytes(4).toString('hex'); // 8 hex chars
 
 function loadServers() {
+  if (!fs.existsSync(SERVERS_FILE)) {
+    // fresh instance — start empty, never auto-create a group
+    console.log('no servers.json — starting with an empty store');
+    saveServers();
+    return;
+  }
   try {
     const data = JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8'));
     servers = new Map(Object.entries(data.servers || {}));
     channelsArr = Object.values(data.channels || {});
     channelIndex.clear();
     for (const c of channelsArr) channelIndex.set(c.id, c);
-    if (!servers.size) throw new Error('empty store — reseeding');
     console.log(`servers loaded: ${servers.size} server(s), ${channelsArr.length} channel(s)`);
   } catch (err) {
-    if (fs.existsSync(SERVERS_FILE)) {
-      console.warn('servers.json unreadable (' + err.message + ') — booting with empty servers');
-      return;
-    }
-    seedDefaultServer();
+    console.warn('servers.json unreadable (' + err.message + ') — booting with empty servers');
   }
-}
-
-function seedDefaultServer() {
-  const acc = (() => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'accounts.json'), 'utf8')).accounts || {}); } catch (_) { return []; } })();
-  const owner = acc.length ? acc.reduce((a, b) => ((a.createdAt || 0) < (b.createdAt || 0) ? a : b)).username : null;
-  const members = acc.map((a) => lower(a.username));
-  const rec = {
-    id: 'srv-sold',
-    name: 'Sold',
-    owner: owner ? lower(owner) : null,
-    color: '#c084fc',
-    invite: genInvite(),
-    members,
-    createdAt: Date.now(),
-  };
-  servers.set(rec.id, rec);
-  channelsArr = DEFAULT_CHANNEL_SEED.map((seed, i) => ({
-    id: `${seed.type === 'voice' ? 'v' : 't'}-${Date.now().toString(36)}-${i}`,
-    serverId: rec.id,
-    ...seed,
-  }));
-  for (const c of channelsArr) channelIndex.set(c.id, c);
-  saveServers();
-  console.log('seeded default "Sold" server with', channelsArr.length, 'channels');
 }
 
 function saveServers() {
@@ -203,16 +180,187 @@ function voiceParticipants() {
 }
 
 function pushHistory(channelId, msg) {
-  const list = history.get(channelId);
+  let list = history.get(channelId);
+  if (!list && typeof channelId === 'string' && channelId.startsWith('dm:')) {
+    list = [];
+    history.set(channelId, list);
+  }
   if (!list) return;
   list.push(msg);
   if (list.length > MAX_HISTORY) list.splice(0, list.length - MAX_HISTORY);
+  if (channelId.startsWith('dm:')) saveDms();
+}
+
+/* ------------------------------------------------------------------ */
+/* Friends — request/accept/decline, persisted; DMs ride the same      */
+/* machinery. Visibility = shared servers ∪ friends.                    */
+/* ------------------------------------------------------------------ */
+
+const FRIENDS_FILE = path.join(DATA_DIR, 'friends.json');
+const DMS_FILE = path.join(DATA_DIR, 'dms.json');
+
+let friendships = new Map();  // lower(username) -> Set(lower(username))
+let friendRequests = new Map(); // lower(username) -> [{ from, ts }]
+
+function loadFriends() {
+  try {
+    const data = JSON.parse(fs.readFileSync(FRIENDS_FILE, 'utf8'));
+    friendships = new Map(Object.entries(data.friendships || {}).map(([k, v]) => [k, new Set(v)]));
+    friendRequests = new Map(Object.entries(data.requests || {}));
+  } catch (_) { /* first run */ }
+}
+
+function saveFriends() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = FRIENDS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({
+      friendships: Object.fromEntries([...friendships].map(([k, v]) => [k, [...v]])),
+      requests: Object.fromEntries(friendRequests),
+    }, null, 2));
+    fs.renameSync(tmp, FRIENDS_FILE);
+  } catch (err) {
+    console.warn('failed to persist friends:', err.message);
+  }
+}
+
+const lowerU = (v) => String(v || '').toLowerCase();
+const areFriends = (a, b) => (friendships.get(lowerU(a)) || new Set()).has(lowerU(b));
+const friendsListOf = (u) => [...(friendships.get(lowerU(u)) || new Set())];
+
+function sharesSpace(a, b) {
+  return sharedServer(a, b) || areFriends(a, b);
+}
+
+function onlineUsernames() {
+  return new Set([...users.values()].map((u) => u.username));
+}
+
+function publicFriend(username, onlineSet) {
+  const acc = accounts.get(lowerU(username));
+  return {
+    username: acc ? acc.username : username,
+    color: acc ? acc.color : '#5865f2',
+    online: onlineSet.has(lowerU(username)),
+  };
+}
+
+function friendsPayloadFor(username) {
+  const u = lowerU(username);
+  const online = onlineUsernames();
+  const friends = friendsListOf(u)
+    .map((f) => publicFriend(f, online))
+    .sort((x, y) => Number(y.online) - Number(x.online) || x.username.localeCompare(y.username));
+  const incoming = (friendRequests.get(u) || []).map((r) => {
+    const acc = accounts.get(r.from);
+    return { username: acc ? acc.username : r.from, color: acc ? acc.color : '#5865f2', ts: r.ts };
+  });
+  const outgoing = [];
+  for (const [to, list] of friendRequests) {
+    for (const r of list) if (r.from === u) outgoing.push({ username: to, ts: r.ts });
+  }
+  return { friends, incoming, outgoing };
+}
+
+function setFriendship(a, b, on) {
+  a = lowerU(a); b = lowerU(b);
+  const add = (x, y) => { const s = new Set(friendships.get(x) || []); s.add(y); friendships.set(x, s); };
+  const del = (x, y) => { const s = new Set(friendships.get(x) || []); s.delete(y); if (s.size) friendships.set(x, s); else friendships.delete(x); };
+  if (on) { add(a, b); add(b, a); } else { del(a, b); del(b, a); }
+}
+
+function pushFriendsTo(username) {
+  const key = lowerU(username);
+  const payload = friendsPayloadFor(key);
+  for (const [sid, u] of users) if (u.username === key) io.to(sid).emit('friends', payload);
+}
+
+function refreshFriendsPresence() {
+  for (const [sid, u] of users) io.to(sid).emit('friends', friendsPayloadFor(u.username));
+}
+
+/* ---------------- DMs: threads ride the channel/history machinery --- */
+
+const dmPair = (channelId) => {
+  if (typeof channelId !== 'string' || !channelId.startsWith('dm:')) return null;
+  const [a, b] = channelId.slice(3).split('::');
+  if (!a || !b || a === b) return null;
+  return [a, b];
+};
+const dmKey = (a, b) => `dm:${[lowerU(a), lowerU(b)].sort().join('::')}`;
+const dmAuthorized = (channelId, username) => {
+  const pair = dmPair(channelId);
+  return !!pair && (pair[0] === username || pair[1] === username) && areFriends(pair[0], pair[1]);
+};
+
+function emitToDmPair(pair, event, payload, exceptSocketId) {
+  for (const [sid, u] of users) {
+    if (exceptSocketId && sid === exceptSocketId) continue;
+    if (pair[0] === u.username || pair[1] === u.username) io.to(sid).emit(event, payload);
+  }
+}
+
+function emitDmSummaries(pair) {
+  for (const [sid, u] of users) {
+    if (pair[0] === u.username || pair[1] === u.username) io.to(sid).emit('dms', dmSummariesFor(u.username));
+  }
+}
+
+function pushDmsTo(username) {
+  const key = lowerU(username);
+  const payload = dmSummariesFor(key);
+  for (const [sid, u] of users) if (u.username === key) io.to(sid).emit('dms', payload);
+}
+
+function saveDms() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const threads = {};
+    for (const [key, list] of history) if (key.startsWith('dm:')) threads[key] = list;
+    const tmp = DMS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ threads }, null, 2));
+    fs.renameSync(tmp, DMS_FILE);
+  } catch (err) {
+    console.warn('failed to persist DMs:', err.message);
+  }
+}
+
+function loadDms() {
+  try {
+    const data = JSON.parse(fs.readFileSync(DMS_FILE, 'utf8'));
+    for (const [key, list] of Object.entries(data.threads || {})) {
+      if (dmPair(key)) history.set(key, Array.isArray(list) ? list : []);
+    }
+  } catch (_) { /* first run */ }
+}
+
+function dmSummariesFor(username) {
+  const u = lowerU(username);
+  const online = onlineUsernames();
+  const out = [];
+  for (const [key, list] of history) {
+    if (!key.startsWith('dm:')) continue;
+    const pair = dmPair(key);
+    if (!pair || (pair[0] !== u && pair[1] !== u)) continue;
+    const other = pair[0] === u ? pair[1] : pair[0];
+    if (!areFriends(u, other)) continue; // unfriended → thread disappears
+    const acc = accounts.get(other);
+    const last = list[list.length - 1];
+    out.push({
+      key, with: other,
+      name: acc ? acc.username : other,
+      color: acc ? acc.color : '#5865f2',
+      online: online.has(other),
+      last: last ? { text: last.text, ts: last.ts, from: lowerU(last.name) === u ? 'me' : other } : null,
+    });
+  }
+  return out.sort((x, y) => ((y.last && y.last.ts) || 0) - ((x.last && x.last.ts) || 0));
 }
 
 /* member-scoped delivery — nothing crosses a server boundary */
 function scopedUsersFor(u) {
   return [...users.values()]
-    .filter((o) => sharedServer(o.username, u.username))
+    .filter((o) => sharesSpace(o.username, u.username))
     .map((o) => ({
       id: o.id, name: o.name, color: o.color, voiceRoom: o.voiceRoom,
       servers: serversFor(o.username).map((s) => s.id),
@@ -245,11 +393,12 @@ function pushVoiceLists() {
 }
 function initFor(u) {
   return {
-    me: { id: u.id, name: u.name, color: u.color },
+    me: { id: u.id, name: u.name, color: u.color, username: lowerU(u.username) },
     servers: serversFor(u.username).map(publicServer),
     channels: channelsForUser(u.username),
     users: scopedUsersFor(u),
     voice: scopedVoiceFor(u),
+    dms: dmSummariesFor(u.username),
   };
 }
 
@@ -295,6 +444,8 @@ function saveAccounts() {
 loadAccounts();
 loadServers();
 for (const c of channelsArr) if (c.type === 'text') history.set(c.id, []);
+loadFriends();
+loadDms();
 
 const USERNAME_RE = /^[a-z0-9_][a-z0-9_.-]{2,23}$/i;
 const normalizeUsername = (v) => String(v || '').trim().slice(0, 24);
@@ -472,6 +623,103 @@ app.post('/api/servers/join', (req, res) => {
   res.json({ server: publicServer(target) });
 });
 
+/* ------------------------------------------------------------------ */
+/* Friends — request / accept / decline / remove, over HTTP             */
+/* ------------------------------------------------------------------ */
+
+function addFriendRequest(from, to) {
+  const list = friendRequests.get(to) || [];
+  if (list.some((r) => r.from === from)) return false;
+  friendRequests.set(to, [...list, { from, ts: Date.now() }]);
+  return true;
+}
+function removeFriendRequest(from, to) {
+  const list = friendRequests.get(to) || [];
+  const next = list.filter((r) => r.from !== from);
+  if (next.length) friendRequests.set(to, next); else friendRequests.delete(to);
+}
+
+app.post('/api/friends/request', (req, res) => {
+  const account = tokenAccount(req, res);
+  if (!account) return;
+  const target = lower(normalizeUsername(String((req.body && req.body.username) || '')));
+  const me = lower(account.username);
+  if (!target) return res.status(400).json({ error: 'Type a username.' });
+  if (target === me) return res.status(400).json({ error: "That's you — you're already on your own side." });
+  const other = accounts.get(target);
+  if (!other) return res.status(404).json({ error: `No one around here goes by "${target}" yet.` });
+  if (areFriends(me, target)) return res.status(409).json({ error: 'You’re already friends.' });
+  // reciprocal request pending → auto-accept
+  const incoming = (friendRequests.get(me) || []).find((r) => r.from === target);
+  if (incoming) {
+    removeFriendRequest(target, me);
+    setFriendship(me, target, true);
+    saveFriends();
+    pushFriendsTo(me); pushFriendsTo(target);
+    pushUserLists();
+    pushDmsTo(me); pushDmsTo(target);
+    console.log(`friends (auto-accept): ${me} <-> ${target}`);
+    return res.json({ status: 'accepted', friends: friendsPayloadFor(me) });
+  }
+  if (addFriendRequest(me, target)) {
+    saveFriends();
+    pushFriendsTo(target); pushFriendsTo(me);
+    console.log(`friend request: ${me} -> ${target}`);
+    return res.json({ status: 'requested', friends: friendsPayloadFor(me) });
+  }
+  return res.status(409).json({ error: 'Already requested — hang tight.' });
+});
+
+app.post('/api/friends/respond', (req, res) => {
+  const account = tokenAccount(req, res);
+  if (!account) return;
+  const from = lower(normalizeUsername(String((req.body && req.body.username) || '')));
+  const accept = !!(req.body && req.body.accept);
+  const me = lower(account.username);
+  const pending = (friendRequests.get(me) || []).find((r) => r.from === from);
+  if (!pending) return res.status(404).json({ error: 'No pending request from them.' });
+  removeFriendRequest(from, me);
+  if (accept) {
+    setFriendship(me, from, true);
+    console.log(`friend accepted: ${me} <-> ${from}`);
+  } else {
+    console.log(`friend declined: ${from} -> ${me}`);
+  }
+  saveFriends();
+  pushFriendsTo(me); pushFriendsTo(from);
+  if (accept) { pushUserLists(); pushDmsTo(me); pushDmsTo(from); }
+  res.json({ status: accept ? 'accepted' : 'declined', friends: friendsPayloadFor(me) });
+});
+
+app.post('/api/friends/remove', (req, res) => {
+  const account = tokenAccount(req, res);
+  if (!account) return;
+  const other = lower(normalizeUsername(String((req.body && req.body.username) || '')));
+  const me = lower(account.username);
+  if (!areFriends(me, other)) return res.status(400).json({ error: "You're not friends with them." });
+  setFriendship(me, other, false);
+  saveFriends();
+  pushFriendsTo(me); pushFriendsTo(other);
+  pushUserLists();
+  pushDmsTo(me); pushDmsTo(other);
+  console.log(`friend removed: ${me} <-> ${other}`);
+  res.json({ ok: true, friends: friendsPayloadFor(me) });
+});
+
+app.post('/api/friends/cancel', (req, res) => {
+  const account = tokenAccount(req, res);
+  if (!account) return;
+  const target = lower(normalizeUsername(String((req.body && req.body.username) || '')));
+  const me = lower(account.username);
+  const pending = (friendRequests.get(target) || []).find((r) => r.from === me);
+  if (!pending) return res.status(404).json({ error: 'No outgoing request to them.' });
+  removeFriendRequest(me, target);
+  saveFriends();
+  pushFriendsTo(me); pushFriendsTo(target);
+  console.log(`friend request cancelled: ${me} -> ${target}`);
+  res.json({ ok: true, friends: friendsPayloadFor(me) });
+});
+
 app.post('/api/servers/leave', (req, res) => {
   const account = tokenAccount(req, res);
   if (!account) return;
@@ -529,23 +777,38 @@ io.on('connection', (socket) => {
     users.set(socket.id, user);
 
     socket.emit('init', initFor(user));
+    socket.emit('friends', friendsPayloadFor(user.username));
     pushUserLists();
     pushVoiceLists();
+    refreshFriendsPresence();
   });
 
   /* ---------------- text chat ---------------- */
 
   socket.on('text:open', ({ channelId } = {}) => {
     const user = users.get(socket.id);
+    if (!user) return;
+    if (typeof channelId === 'string' && channelId.startsWith('dm:')) {
+      if (!dmAuthorized(channelId, user.username)) return;
+      socket.emit('text:history', { channelId, messages: history.get(channelId) || [] });
+      return;
+    }
     const ch = channelById(channelId);
-    if (!user || !ch || ch.type !== 'text' || !memberOfServer(user.username, ch.serverId)) return;
+    if (!ch || ch.type !== 'text' || !memberOfServer(user.username, ch.serverId)) return;
     socket.emit('text:history', { channelId, messages: history.get(channelId) || [] });
   });
 
   socket.on('text:send', ({ channelId, text } = {}) => {
     const user = users.get(socket.id);
-    const ch = channelById(channelId);
-    if (!user || !ch || ch.type !== 'text' || !memberOfServer(user.username, ch.serverId)) return;
+    if (!user) return;
+    const isDm = typeof channelId === 'string' && channelId.startsWith('dm:');
+    let ch = null;
+    if (isDm) {
+      if (!dmAuthorized(channelId, user.username)) return;
+    } else {
+      ch = channelById(channelId);
+      if (!ch || ch.type !== 'text' || !memberOfServer(user.username, ch.serverId)) return;
+    }
     text = String(text || '').trim().slice(0, 2000);
     if (!text) return;
 
@@ -560,7 +823,12 @@ io.on('connection', (socket) => {
       ts: Date.now(),
     };
     pushHistory(channelId, msg);
-    emitToServerMembers(ch.serverId, 'text:message', msg);
+    if (isDm) {
+      emitToDmPair(dmPair(channelId), 'text:message', msg);
+      emitDmSummaries(dmPair(channelId));
+    } else {
+      emitToServerMembers(ch.serverId, 'text:message', msg);
+    }
   });
 
   /* emoji reactions — toggle on/off, broadcast the fresh counts */
@@ -568,8 +836,12 @@ io.on('connection', (socket) => {
 
   socket.on('text:react', ({ channelId, messageId, emoji } = {}) => {
     const user = users.get(socket.id);
-    const ch = channelById(channelId);
-    if (!user || !ch || !memberOfServer(user.username, ch.serverId) || !ALLOWED_REACTIONS.has(emoji)) return;
+    if (!user || !ALLOWED_REACTIONS.has(emoji)) return;
+    const isDm = typeof channelId === 'string' && channelId.startsWith('dm:');
+    const ch = isDm ? null : channelById(channelId);
+    if (isDm) {
+      if (!dmAuthorized(channelId, user.username)) return;
+    } else if (!ch || !memberOfServer(user.username, ch.serverId)) return;
     const list = history.get(channelId);
     if (!list) return;
     const msg = list.find((m) => m.id === Number(messageId));
@@ -583,13 +855,24 @@ io.on('connection', (socket) => {
     if (voters.length) msg.reactions[emoji] = voters;
     else delete msg.reactions[emoji];
 
-    emitToServerMembers(ch.serverId, 'text:reaction', { channelId, messageId: msg.id, reactions: msg.reactions });
+    if (isDm) {
+      saveDms(); // persist reaction counts too
+      emitToDmPair(dmPair(channelId), 'text:reaction', { channelId, messageId: msg.id, reactions: msg.reactions });
+    } else {
+      emitToServerMembers(ch.serverId, 'text:reaction', { channelId, messageId: msg.id, reactions: msg.reactions });
+    }
   });
 
   socket.on('typing', ({ channelId } = {}) => {
     const user = users.get(socket.id);
+    if (!user) return;
+    if (typeof channelId === 'string' && channelId.startsWith('dm:')) {
+      if (!dmAuthorized(channelId, user.username)) return;
+      emitToDmPair(dmPair(channelId), 'typing', { channelId, userId: user.id, name: user.name }, socket.id);
+      return;
+    }
     const ch = channelById(channelId);
-    if (!user || !ch || !memberOfServer(user.username, ch.serverId)) return;
+    if (!ch || !memberOfServer(user.username, ch.serverId)) return;
     emitToServerMembers(ch.serverId, 'typing', { channelId, userId: user.id, name: user.name }, socket.id);
   });
 
@@ -670,6 +953,7 @@ io.on('connection', (socket) => {
     users.delete(socket.id);
     if (user.voiceRoom) pushVoiceLists();
     pushUserLists();
+    refreshFriendsPresence();
   });
 });
 

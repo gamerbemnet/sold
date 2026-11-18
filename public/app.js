@@ -9,13 +9,20 @@ const icon = (id, cls) =>
 const socket = io();
 
 const state = {
-  me: null,                 // {id, name, color}
+  me: null,                 // {id, name, color, username}
   channels: [],             // channels of MY servers only (server filters)
-  users: [],                // users sharing a server with me
+  users: [],                // users sharing a server with me + friends
   participants: [],         // voice participants in my servers
-  activeText: null,
+  activeText: null,         // channel id or dm:a::b key
   servers: [],              // my servers
   activeServerId: null,
+  view: 'home',             // 'home' (friends + DMs) | 'server'
+  dms: [],                  // [{ key, with, name, color, online, last }]
+  friends: [],              // [{username, color, online}]
+  incoming: [],             // incoming friend requests
+  outgoing: [],             // outgoing friend requests
+  friendsTab: 'online',     // online | all | pending | add
+  friendsOpen: false,       // home view showing the friends browser vs a DM thread
 };
 
 const voice = {
@@ -338,14 +345,18 @@ socket.on('init', (data) => {
   state.channels = data.channels || [];
   state.users = data.users || [];
   state.participants = data.voice || [];
+  state.dms = data.dms || [];
 
   // pick which server to show: the one we just created → saved choice → first server → none
   let saved = null;
   try { saved = localStorage.getItem(SERVER_KEY); } catch (_) {}
   if (!state.servers.some((s) => s.id === saved)) saved = null;
   state.activeServerId = saved || (state.servers[0] && state.servers[0].id) || null;
+  // DMs are the default: land on home unless a create/join/invite just happened
+  state.view = 'home';
   if (pendingServerSwitch && state.servers.some((s) => s.id === pendingServerSwitch)) {
     state.activeServerId = pendingServerSwitch;
+    state.view = 'server';
     try { localStorage.setItem(SERVER_KEY, pendingServerSwitch); } catch (_) {}
     pendingServerSwitch = null;
   }
@@ -353,12 +364,18 @@ socket.on('init', (data) => {
   renderServers();
   renderChannels();
   renderMembers();
-  updateServerChrome();
+  renderDmList();
+  updateHomeBadge();
+  updateViewChrome();
   $('me-avatar').textContent = initial(data.me.name);
   $('me-avatar').style.background = gradientFor(data.me.color);
   $('me-name').textContent = data.me.name;
   $('me-status').textContent = 'Online';
-  if (state.activeServerId) {
+  if (state.view === 'home') {
+    const lastDm = (() => { try { return localStorage.getItem('sold-last-dm'); } catch (_) { return null; } })();
+    if (lastDm && state.dms.some((d) => d.key === lastDm)) openDm(lastDm);
+    else openFriendsPage();
+  } else if (state.activeServerId) {
     const mine = myChannels();
     if (!state.activeText || !mine.some((c) => c.id === state.activeText)) {
       const firstText = mine.find((c) => c.type === 'text');
@@ -380,8 +397,12 @@ socket.on('init', (data) => {
           url.searchParams.delete('invite');
           history.replaceState(null, '', url);
         } catch (_) {}
-        if (res.ok) toast(`Joined “${res.data.server.name}”`, 'success');
-        else toast(res.data.error || 'Invite not found.', 'error');
+        if (res.ok) {
+          toast(`Joined “${res.data.server.name}”`, 'success');
+          goToServer(res.data.server.id);
+        } else {
+          toast(res.data.error || 'Invite not found.', 'error');
+        }
       });
     }
   }
@@ -394,6 +415,28 @@ socket.on('channels', (channels) => {
 });
 
 socket.on('users', (users) => { state.users = users; renderMembers(); });
+
+socket.on('friends', (data) => {
+  const incoming = (data && data.incoming) || [];
+  if (prevIncomingSnapshot !== null) {
+    for (const r of incoming) {
+      if (!prevIncomingSnapshot.has(r.username)) {
+        toast(`${r.username} sent you a friend request`, 'success');
+      }
+    }
+  }
+  prevIncomingSnapshot = new Set(incoming.map((r) => r.username));
+  state.friends = (data && data.friends) || [];
+  state.incoming = incoming;
+  state.outgoing = (data && data.outgoing) || [];
+  renderFriends();
+  renderDmList();
+});
+
+socket.on('dms', (list) => {
+  state.dms = Array.isArray(list) ? list : [];
+  renderDmList();
+});
 
 socket.on('voice:update', (list) => {
   state.participants = list;
@@ -411,9 +454,13 @@ socket.on('text:message', (msg) => {
   if (msg.channelId === state.activeText) {
     appendMessage(msg);
   } else if (msg.userId !== socket.id) {
-    // missed a message in another channel → unread pill + white indicator
+    // missed a message in another channel/DM → unread pill + badge
     unreadMap.set(msg.channelId, (unreadMap.get(msg.channelId) || 0) + 1);
     renderChannels();
+    if (String(msg.channelId).startsWith('dm:')) {
+      renderDmList();
+      updateHomeBadge();
+    }
   }
 });
 
@@ -516,7 +563,7 @@ function renderServers() {
   list.innerHTML = '';
   for (const srv of state.servers) {
     const el = document.createElement('button');
-    el.className = 'rail-icon server-rail-item' + (srv.id === state.activeServerId ? ' active' : '');
+    el.className = 'rail-icon server-rail-item' + (srv.id === state.activeServerId && state.view === 'server' ? ' active' : '');
     el.style.background = srv.color;
     el.dataset.id = srv.id;
     el.textContent = initials(srv.name);
@@ -526,32 +573,267 @@ function renderServers() {
   }
 }
 
-function switchServer(id) {
-  if (state.activeServerId === id) return;
-  if (!state.servers.some((s) => s.id === id)) return;
-  state.activeServerId = id;
+function goToServer(id) {
+  state.view = 'server';
+  state.friendsOpen = false;
   try { localStorage.setItem(SERVER_KEY, id); } catch (_) {}
+  if (!state.servers.some((s) => s.id === id)) {
+    pendingServerSwitch = id; // re-init will arrive with the new server in it
+    return;
+  }
+  state.activeServerId = id;
   state.activeText = null;
   typingMap.forEach((t) => clearTimeout(t.timeout));
   typingMap.clear();
-  renderTyping();
   renderServers();
   renderChannels();
   renderMembers();
-  updateServerChrome();
+  updateViewChrome();
   const firstText = myChannels().find((c) => c.type === 'text');
   if (firstText) openChannel(firstText.id);
 }
 
-function updateServerChrome() {
-  const hasServer = !!state.activeServerId;
-  $('no-server-state').classList.toggle('hidden', hasServer);
-  $('app').classList.toggle('no-servers', !hasServer);
+function switchServer(id) {
+  if (!state.servers.some((s) => s.id === id)) return;
+  const changed = state.activeServerId !== id;
+  state.view = 'server';
+  state.friendsOpen = false;
+  state.activeServerId = id;
+  try { localStorage.setItem(SERVER_KEY, id); } catch (_) {}
+  if (changed) {
+    state.activeText = null;
+    typingMap.forEach((t) => clearTimeout(t.timeout));
+    typingMap.clear();
+    renderTyping();
+  }
+  renderServers();
+  renderChannels();
+  renderMembers();
+  updateViewChrome();
+  if (changed) {
+    const firstText = myChannels().find((c) => c.type === 'text');
+    if (firstText) openChannel(firstText.id);
+  }
+}
+
+function updateViewChrome() {
+  const home = state.view === 'home';
+  $('app').classList.toggle('home-view', home);
   const srv = activeServer();
-  $('server-name').textContent = srv ? srv.name : 'Sold';
-  $('server-invite-btn').style.display = hasServer ? '' : 'none';
-  $('leave-server-btn').style.display = hasServer ? '' : 'none';
-  $('add-channel-btn-2').style.display = hasServer ? '' : 'none';
+  $('sidebar-title').textContent = home ? 'Friends' : (srv ? srv.name : 'Sold');
+  $('sidebar-actions').classList.toggle('hidden', home);
+  $('channels-scroll').classList.toggle('hidden', home);
+  $('home-scroll').classList.toggle('hidden', !home);
+  $('friends-panel').classList.toggle('hidden', !(home && state.friendsOpen));
+  $('chat-section').classList.toggle('hidden', home && state.friendsOpen);
+  $('toggle-members').style.visibility = home ? 'hidden' : '';
+  $('home-btn').classList.toggle('active', home);
+  const listed = document.querySelectorAll('#server-list .server-rail-item');
+  listed.forEach((el) => el.classList.toggle('active', !home && el.dataset.id === state.activeServerId));
+}
+
+function openFriendsPage() {
+  state.view = 'home';
+  state.friendsOpen = true;
+  renderFriends();
+  updateViewChrome();
+}
+
+/* -------- DM helpers -------- */
+const dmKeyFor = (a, b) => `dm:${[String(a || '').toLowerCase(), String(b || '').toLowerCase()].sort().join('::')}`;
+const dmOtherOf = (key) => {
+  const meName = String((state.me && state.me.username) || '').toLowerCase();
+  const pair = String(key || '').slice(3).split('::');
+  return pair[0] === meName ? pair[1] : pair[0];
+};
+
+function openDm(key) {
+  const other = dmOtherOf(key);
+  state.view = 'home';
+  state.friendsOpen = false;
+  state.activeText = key;
+  try { localStorage.setItem('sold-last-dm', key); } catch (_) {}
+  unreadMap.delete(key);
+  typingMap.forEach((t) => clearTimeout(t.timeout));
+  typingMap.clear();
+  renderTyping();
+  renderDmList();
+  updateHomeBadge();
+  updateViewChrome();
+  $('header-hash').textContent = '@';
+  $('channel-title').textContent = other;
+  $('channel-topic').textContent = '';
+  $('message-input').placeholder = `Message @${other}`;
+  $('messages').innerHTML = '';
+  clearFilter();
+  socket.emit('text:open', { channelId: key });
+}
+
+function renderDmList() {
+  const wrap = $('dm-list');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!state.dms.length) {
+    const empty = document.createElement('div');
+    empty.className = 'dm-empty';
+    empty.textContent = 'No conversations yet. Add a friend, then say hi.';
+    wrap.appendChild(empty);
+    return;
+  }
+  for (const d of state.dms) {
+    const el = document.createElement('button');
+    const missed = unreadMap.get(d.key) || 0;
+    const isActive = state.view === 'home' && !state.friendsOpen && state.activeText === d.key;
+    el.className = 'dm-item' + (isActive ? ' active' : '') + (missed && !isActive ? ' has-unread' : '');
+    const preview = d.last
+      ? `<span class="dm-preview">${d.last.from === 'me' ? 'You: ' : ''}${escapeHtml(d.last.text)}</span>`
+      : '';
+    const badge = missed && !isActive ? `<span class="badge">${missed > 99 ? '99+' : missed}</span>` : '';
+    el.innerHTML =
+      `<span class="dm-avatar" style="background:${gradientFor(d.color)}">${escapeHtml(initial(d.name))}${d.online ? '<span class="status-dot"></span>' : ''}</span>` +
+      `<span class="dm-meta"><span class="dm-name">${escapeHtml(d.name)}</span>${preview}</span>` +
+      badge;
+    el.addEventListener('click', () => openDm(d.key));
+    wrap.appendChild(el);
+  }
+}
+
+function updateHomeBadge() {
+  let total = 0;
+  for (const [k, v] of unreadMap) if (String(k).startsWith('dm:')) total += v;
+  const el = $('home-unread');
+  if (!el) return;
+  el.classList.toggle('hidden', !total);
+  el.textContent = total > 99 ? '99+' : String(total);
+  $('home-btn').title = total ? `Direct messages (${total} unread)` : 'Direct messages';
+}
+
+/* -------- friends browser -------- */
+
+let prevIncomingSnapshot = null; // set on the first 'friends' push; toasts afterwards
+
+function syncIncomingSnapshot() {
+  prevIncomingSnapshot = new Set(state.incoming.map((r) => r.username));
+}
+
+function applyFriendsPayload(payload) {
+  if (!payload) return;
+  state.friends = payload.friends || [];
+  state.incoming = payload.incoming || [];
+  state.outgoing = payload.outgoing || [];
+  syncIncomingSnapshot();
+  renderFriends();
+  renderDmList();
+}
+
+function renderFriends() {
+  const list = $('friends-list');
+  if (!list) return;
+  const pendingCount = state.incoming.length;
+  $('friends-pending-badge').classList.toggle('hidden', !pendingCount);
+  $('friends-pending-badge').textContent = pendingCount;
+  $('pending-tab-badge').classList.toggle('hidden', !pendingCount);
+  $('pending-tab-badge').textContent = pendingCount;
+  document.querySelectorAll('.ftab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.friendsTab));
+  list.innerHTML = '';
+
+  if (state.friendsTab === 'add') {
+    list.innerHTML =
+      `<div class="add-friend-box">` +
+        `<h3>Add a Friend</h3>` +
+        `<p>Send a request with their exact Sold username. Once they accept, you can message each other directly.</p>` +
+        `<form id="add-friend-form" class="add-friend-form">` +
+          `<input id="add-friend-input" type="text" placeholder="username" maxlength="24" autocomplete="off" spellcheck="false" />` +
+          `<button class="btn-primary" type="submit">Send request</button>` +
+        `</form>` +
+        `<p id="add-friend-msg" class="add-friend-msg"></p>` +
+      `</div>`;
+    const input = $('add-friend-input');
+    if (input) input.focus();
+    return;
+  }
+
+  if (state.friendsTab === 'pending') {
+    const section = (label) => {
+      const div = document.createElement('div');
+      div.className = 'friend-section-label';
+      div.textContent = label;
+      list.appendChild(div);
+    };
+    section(`Incoming — ${state.incoming.length}`);
+    if (!state.incoming.length) {
+      const p = document.createElement('div');
+      p.className = 'friends-empty';
+      p.textContent = 'No incoming requests right now.';
+      list.appendChild(p);
+    }
+    for (const r of state.incoming) {
+      const el = document.createElement('div');
+      el.className = 'friend-row';
+      el.innerHTML =
+        `<div class="friend-avatar" style="background:${gradientFor(r.color)}">${escapeHtml(initial(r.username))}</div>` +
+        `<div class="friend-info"><div class="friend-name">${escapeHtml(r.username)}</div>` +
+        `<div class="friend-status">wants to be friends</div></div>` +
+        `<div class="friend-actions">` +
+          `<button class="friend-act primary" data-action="accept" data-username="${escapeHtml(r.username)}" title="Accept">${icon('check')}</button>` +
+          `<button class="friend-act danger" data-action="decline" data-username="${escapeHtml(r.username)}" title="Decline">${icon('x')}</button>` +
+        `</div>`;
+      list.appendChild(el);
+    }
+    section(`Outgoing — ${state.outgoing.length}`);
+    if (!state.outgoing.length) {
+      const p = document.createElement('div');
+      p.className = 'friends-empty';
+      p.textContent = 'No outgoing requests.';
+      list.appendChild(p);
+    }
+    for (const r of state.outgoing) {
+      const el = document.createElement('div');
+      el.className = 'friend-row';
+      el.innerHTML =
+        `<div class="friend-avatar" style="background:${gradientFor('#4a4157')}">${escapeHtml(initial(r.username))}</div>` +
+        `<div class="friend-info"><div class="friend-name">${escapeHtml(r.username)}</div>` +
+        `<div class="friend-status">request sent — waiting on them</div></div>` +
+        `<div class="friend-actions"><button class="friend-cancel-btn" data-action="cancel" data-username="${escapeHtml(r.username)}">Cancel</button></div>`;
+      list.appendChild(el);
+    }
+    return;
+  }
+
+  const onlineOnly = state.friendsTab === 'online';
+  const shown = state.friends.filter((f) => !onlineOnly || f.online);
+  const onlineCount = state.friends.filter((f) => f.online).length;
+  const sectionLabel = document.createElement('div');
+  sectionLabel.className = 'friend-section-label';
+  sectionLabel.textContent = onlineOnly ? `Online — ${onlineCount}` : `All — ${state.friends.length}`;
+  list.appendChild(sectionLabel);
+
+  if (!shown.length) {
+    const p = document.createElement('div');
+    p.className = 'friends-empty';
+    if (!state.friends.length) {
+      p.innerHTML =
+        `<div class="big">👋</div><div>You’re not friends with anyone yet.<br>Add someone and the DMs start here.</div>` +
+        `<div style="margin-top:14px"><button class="btn-primary" data-action="goto-add">Add your first friend</button></div>`;
+    } else {
+      p.innerHTML = `<div class="big">🌙</div>None of your friends are online right now.`;
+    }
+    list.appendChild(p);
+    return;
+  }
+  for (const f of shown) {
+    const el = document.createElement('div');
+    el.className = 'friend-row';
+    el.innerHTML =
+      `<div class="friend-avatar" style="background:${gradientFor(f.color)}">${escapeHtml(initial(f.username))}<span class="status-dot${f.online ? ' on' : ''}"></span></div>` +
+      `<div class="friend-info"><div class="friend-name">${escapeHtml(f.username)}</div>` +
+      `<div class="friend-status">${f.online ? 'Online' : 'Offline'}</div></div>` +
+      `<div class="friend-actions">` +
+        `<button class="friend-act primary" data-action="message" data-username="${escapeHtml(f.username)}" title="Message ${escapeHtml(f.username)}">${icon('chat')}</button>` +
+        `<button class="friend-act danger" data-action="remove" data-username="${escapeHtml(f.username)}" title="Remove friend">${icon('x')}</button>` +
+      `</div>`;
+    list.appendChild(el);
+  }
 }
 
 /* -------- add-a-server modal -------- */
@@ -564,9 +846,77 @@ function closeAddServer() {
   $('add-server-overlay').classList.add('hidden');
 }
 $('add-server-btn').addEventListener('click', () => openAddServer('create'));
-$('ns-create').addEventListener('click', () => openAddServer('create'));
-$('ns-join').addEventListener('click', () => openAddServer('join'));
 $('add-server-close').addEventListener('click', closeAddServer);
+
+/* -------- home rail + friends sidebar -------- */
+$('home-btn').addEventListener('click', openFriendsPage);
+$('friends-nav-btn').addEventListener('click', openFriendsPage);
+document.querySelectorAll('.ftab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.friendsTab = btn.dataset.tab;
+    renderFriends();
+  });
+});
+
+$('friends-list').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'add-friend-form') return;
+  e.preventDefault();
+  const input = $('add-friend-input');
+  const msg = $('add-friend-msg');
+  const username = (input.value || '').trim();
+  if (!username) return;
+  const res = await postJson('/api/friends/request', { token: currentToken(), username });
+  if (!res.ok) {
+    msg.textContent = (res.data && res.data.error) || 'Could not send the request.';
+    msg.className = 'add-friend-msg err';
+    return;
+  }
+  applyFriendsPayload(res.data.friends);
+  input.value = '';
+  msg.textContent = res.data.status === 'accepted'
+    ? `You and ${username} are friends now — say hi in your DMs.`
+    : `Request sent to ${username}. They’ll see it under Pending.`;
+  msg.className = 'add-friend-msg ok';
+});
+
+$('friends-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === 'goto-add') {
+    state.friendsTab = 'add';
+    renderFriends();
+    return;
+  }
+  const username = btn.dataset.username;
+  if (!username) return;
+  const token = currentToken();
+  if (action === 'message') {
+    openDm(dmKeyFor((state.me && state.me.username) || '', username));
+    return;
+  }
+  if (action === 'remove') {
+    if (!window.confirm(`Remove ${username} from your friends?`)) return;
+    const res = await postJson('/api/friends/remove', { token, username });
+    if (!res.ok) return toast((res.data && res.data.error) || 'Could not remove.', 'error');
+    applyFriendsPayload(res.data.friends);
+    toast(`Removed ${username} from your friends`, 'success');
+    return;
+  }
+  if (action === 'accept' || action === 'decline') {
+    const res = await postJson('/api/friends/respond', { token, username, accept: action === 'accept' });
+    if (!res.ok) return toast((res.data && res.data.error) || 'Could not respond.', 'error');
+    applyFriendsPayload(res.data.friends);
+    toast(action === 'accept' ? `You and ${username} are friends now` : 'Request declined', 'success');
+    return;
+  }
+  if (action === 'cancel') {
+    const res = await postJson('/api/friends/cancel', { token, username });
+    if (!res.ok) return toast((res.data && res.data.error) || 'Could not cancel.', 'error');
+    applyFriendsPayload(res.data.friends);
+    toast('Request cancelled', 'success');
+  }
+});
 $('add-server-overlay').addEventListener('click', (e) => {
   if (e.target === $('add-server-overlay')) closeAddServer();
 });
@@ -578,10 +928,10 @@ $('add-server-create-form').addEventListener('submit', async (e) => {
   if (name.length < 2) return toast('Name it at least 2 characters.', 'error');
   const res = await postJson('/api/servers/create', { token: currentToken(), name });
   if (!res.ok) return toast(res.data.error || 'Could not create the server.', 'error');
-  pendingServerSwitch = res.data.server.id;
   input.value = '';
   closeAddServer();
   toast(`Created “${res.data.server.name}”`, 'success');
+  goToServer(res.data.server.id);
 });
 
 $('add-server-join-form').addEventListener('submit', async (e) => {
@@ -594,6 +944,7 @@ $('add-server-join-form').addEventListener('submit', async (e) => {
   input.value = '';
   closeAddServer();
   toast(`Welcome to “${res.data.server.name}”`, 'success');
+  goToServer(res.data.server.id);
 });
 
 /* -------- invite modal -------- */
@@ -640,6 +991,10 @@ $('leave-server-btn').addEventListener('click', async () => {
   if (!res.ok) return toast(res.data.error || 'Could not leave.', 'error');
   try { localStorage.removeItem(SERVER_KEY); } catch (_) {}
   toast(`Left “${srv.name}”`, 'success');
+  state.view = 'home';
+  state.friendsOpen = true;
+  state.activeText = null;
+  openFriendsPage();
 });
 
 /* ------------------------------------------------------------------ */
@@ -709,14 +1064,19 @@ function escapeHtml(s) {
 /* ------------------------------------------------------------------ */
 
 function openChannel(id) {
+  if (String(id).startsWith('dm:')) return openDm(id);
   const ch = channelById(id);
   if (!ch || ch.type !== 'text') return;
+  state.view = 'server';
+  state.friendsOpen = false;
   state.activeText = id;
   unreadMap.delete(id); // reading it clears the unread pill
   typingMap.forEach((t) => clearTimeout(t.timeout));
   typingMap.clear();
   renderTyping();
   renderChannels();
+  updateViewChrome();
+  $('header-hash').textContent = '#';
   $('channel-title').textContent = ch.name;
   $('channel-topic').textContent = ch.topic || '';
   $('message-input').placeholder = `Message #${ch.name}`;
@@ -742,9 +1102,22 @@ function renderHistory(messages) {
   wrap.innerHTML = '';
   lastDayShown = null;
 
-  // welcome hero, like the top of a fresh Discord channel
-  const ch = channelById(state.activeText);
-  if (ch) {
+  // welcome hero, like the top of a fresh Discord channel / DM
+  const isDm = String(state.activeText || '').startsWith('dm:');
+  if (isDm) {
+    const meta = state.dms.find((d) => d.key === state.activeText);
+    const name = meta ? meta.name : dmOtherOf(state.activeText);
+    const hero = document.createElement('div');
+    hero.className = 'msg-hero';
+    hero.innerHTML =
+      `<div class="hero-icon at">@</div>` +
+      `<h2>${escapeHtml(name)}</h2>` +
+      `<p class="hero-topic">This is the beginning of your direct message history. Just the two of you.</p>` +
+      (messages.length ? '' : `<p class="hero-quiet">No messages yet — say hi 👋</p>`);
+    wrap.appendChild(hero);
+  } else {
+    const ch = channelById(state.activeText);
+    if (ch) {
     const people = state.users.length;
     const human = people > 1
       ? `${people} people are hanging out here right now.`
@@ -757,6 +1130,7 @@ function renderHistory(messages) {
       `<p class="hero-topic">${ch.topic ? escapeHtml(ch.topic) + ' — ' : ''}${human}</p>` +
       (messages.length ? '' : `<p class="hero-quiet">It's quiet in here. Be the first to say hi 👋</p>`);
     wrap.appendChild(hero);
+    }
   }
 
   let last = null;

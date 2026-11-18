@@ -105,6 +105,10 @@ async function main() {
     (css.headers.get('content-type') || '').includes('text/css'),
     `${css.status} ${css.headers.get('content-type')}`);
 
+  check('DM-first home view is deployed',
+    html.includes('id="friends-panel"') && html.includes('id="dm-list"') && html.includes('id="home-btn"'),
+    'friends panel + DM list present in served HTML');
+
   /* ---------------- worker proxy to the origin ---------------------------- */
   const sj = await fetch(`${BASE}/socket.io/socket.io.js`);
   check('socket.io client script proxied', sj.status === 200, `status=${sj.status}`);
@@ -187,6 +191,29 @@ async function main() {
   const sig = await a.waitFor('voice:signal');
   check('SDP/ICE signal relayed through Pages', sig.from === initB.me.id &&
     sig.data?.sdp === fakeSdp.sdp, `from ${sig.from}`);
+
+  /* ---------------- friends + DMs through Pages ------------------------- */
+  const dmKey = `dm:${[aliceName.toLowerCase(), bobName.toLowerCase()].sort().join('::')}`;
+  const fr = await api('/api/friends/request', { token: li.data.token, username: bobName });
+  check('friend request through Pages',
+    fr.status === 200 && fr.data.status === 'requested', `status=${fr.status}`);
+
+  const incoming = await b.waitFor('friends', (f) => f.incoming.length === 1);
+  check('friend request reaches the other live', incoming.incoming[0].username === aliceName.toLowerCase());
+
+  const accept = await api('/api/friends/respond', { token: suBob.data.token, username: aliceName, accept: true });
+  check('friend accept through Pages',
+    accept.status === 200 && accept.data.status === 'accepted', `status=${accept.status}`);
+
+  a.send('text:send', { channelId: dmKey, text: 'hello over Pages DMs' });
+  const dmMsg = await b.waitFor('text:message', (x) => x.channelId === dmKey);
+  check('DM relayed through Pages', dmMsg.text === 'hello over Pages DMs');
+
+  b.send('text:open', { channelId: dmKey });
+  const dmHist = await b.waitFor('text:history', (h) => h.channelId === dmKey);
+  check('DM history readable through Pages',
+    dmHist.messages.some((m) => m.text === 'hello over Pages DMs'),
+    `${dmHist.messages.length} msg(s)`);
 
   a.close();
   b.close();

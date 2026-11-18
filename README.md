@@ -2,10 +2,11 @@
 
 *(formerly "Confide"; GitHub repo `sold`, hosted on Cloudflare Pages)*
 
-A private, Discord-style chat: invite-only servers, real-time text chat with
-typing indicators, and WebRTC voice/video rooms with screen sharing. New
-accounts start with **no servers** — you create your own or join one with an
-invite code, and nobody else can see in.
+A private, Discord-style chat: direct messages first, invite-only servers,
+real-time text chat with typing indicators, and WebRTC voice/video rooms with
+screen sharing. New accounts start with **no servers and no friends** — add
+someone by username, they accept, and you can message each other. Everyone
+else can see nothing.
 
 ## Features
 

@@ -30,6 +30,10 @@
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-invite" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07 0l3-3A5 5 0 0 0 13 2.93l-1.5 1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-leave" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 6 8.38 8.38 0 0 1-3.8-.9L3 21l1.6-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 6-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
   <!-- Auth overlay: sign in / create account -->
@@ -123,6 +127,8 @@
   <div id="app" class="app">
     <!-- Server rail -->
     <nav class="server-rail">
+      <button class="rail-icon home-rail-btn active" id="home-btn" title="Direct messages"><svg class="icon"><use href="#i-home"/></svg><span id="home-unread" class="rail-badge hidden"></span></button>
+      <div class="rail-sep"></div>
       <div id="server-list" class="server-list"></div>
       <div class="rail-sep"></div>
       <button class="rail-icon add" id="add-server-btn" title="Add a server"><svg class="icon"><use href="#i-plus"/></svg></button>
@@ -131,15 +137,26 @@
     <!-- Channel sidebar -->
     <aside class="channel-sidebar">
       <header class="sidebar-header">
-        <span class="head-left"><span id="server-name">Sold</span></span>
-        <div class="sidebar-actions">
+        <span class="head-left"><span id="sidebar-title">Friends</span></span>
+        <div class="sidebar-actions" id="sidebar-actions">
           <button id="server-invite-btn" class="icon-btn" title="Copy invite link"><svg class="icon"><use href="#i-invite"/></svg></button>
           <button id="leave-server-btn" class="icon-btn" title="Leave server"><svg class="icon"><use href="#i-leave"/></svg></button>
           <button id="add-channel-btn-2" class="icon-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
         </div>
       </header>
 
-      <div class="channels-scroll">
+      <!-- Home view: friends + direct messages -->
+      <div id="home-scroll" class="home-scroll">
+        <button id="friends-nav-btn" class="home-nav-btn">
+          <svg class="icon"><use href="#i-users"/></svg>
+          <span>Friends</span>
+          <span id="friends-pending-badge" class="badge hidden"></span>
+        </button>
+        <div class="dm-list-header"><span>Direct Messages</span></div>
+        <div id="dm-list" class="dm-list"></div>
+      </div>
+
+      <div class="channels-scroll hidden" id="channels-scroll">
         <div class="channel-group">
           <div class="group-label">Text channels</div>
           <div id="text-channels"></div>
@@ -166,17 +183,6 @@
 
     <!-- Main column -->
     <main class="main">
-      <!-- No-server empty state (fresh account with no invites yet) -->
-      <div id="no-server-state" class="no-server hidden">
-        <div class="no-server-logo">S</div>
-        <h1>Welcome to Sold</h1>
-        <p>Private rooms for you and your people. Create a server, or ask a friend for their invite code.</p>
-        <div class="no-server-actions">
-          <button id="ns-create" class="btn-primary">Create a server</button>
-          <button id="ns-join" class="btn-ghost">Join with invite</button>
-        </div>
-      </div>
-
       <!-- Voice call panel -->
       <section id="voice-panel" class="voice-panel hidden">
         <div class="voice-toolbar">
@@ -193,10 +199,25 @@
         <div id="video-grid" class="video-grid"></div>
       </section>
 
+      <!-- Friends browser (home view) -->
+      <section id="friends-panel" class="friends-panel hidden">
+        <header class="chat-header friends-header">
+          <svg class="icon friends-head-icon"><use href="#i-users"/></svg>
+          <span class="friends-title">Friends</span>
+          <div class="friends-tabs">
+            <button class="ftab active" data-tab="online" type="button">Online</button>
+            <button class="ftab" data-tab="all" type="button">All</button>
+            <button class="ftab" data-tab="pending" type="button">Pending<span id="pending-tab-badge" class="ftab-badge hidden"></span></button>
+            <button class="ftab ftab-add" data-tab="add" type="button">Add Friend</button>
+          </div>
+        </header>
+        <div id="friends-list" class="friends-list"></div>
+      </section>
+
       <!-- Chat -->
-      <section class="chat">
+      <section class="chat" id="chat-section">
         <header class="chat-header">
-          <span class="hash">#</span>
+          <span class="hash" id="header-hash">#</span>
           <span id="channel-title">general</span>
           <span class="divider"></span>
           <span id="channel-topic" class="topic"></span>
@@ -231,7 +252,7 @@
     </main>
 
     <!-- Members sidebar -->
-    <aside class="member-sidebar">
+    <aside class="member-sidebar" id="member-sidebar">
       <header class="members-header">Members — <span id="member-count">0</span></header>
       <div id="member-list" class="member-list"></div>
     </aside>
