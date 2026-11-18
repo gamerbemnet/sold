@@ -10,10 +10,12 @@ const socket = io();
 
 const state = {
   me: null,                 // {id, name, color}
-  channels: [],
-  users: [],
-  participants: [],         // voice participants across the server
+  channels: [],             // channels of MY servers only (server filters)
+  users: [],                // users sharing a server with me
+  participants: [],         // voice participants in my servers
   activeText: null,
+  servers: [],              // my servers
+  activeServerId: null,
 };
 
 const voice = {
@@ -151,6 +153,13 @@ const reactionsBarHtml =
 
 const channelById = (id) => state.channels.find((c) => c.id === id);
 const participantById = (id) => state.participants.find((p) => p.id === id);
+const activeServer = () => state.servers.find((s) => s.id === state.activeServerId) || null;
+const myChannels = () => state.channels.filter((c) => c.serverId === state.activeServerId);
+const myMembers = () => state.users.filter((u) => (u.servers || []).includes(state.activeServerId));
+const myParticipants = () => state.participants.filter((p) => p.serverId === state.activeServerId);
+const SERVER_KEY = 'sold-server';
+let pendingServerSwitch = null;
+let inviteRedeemed = false;
 
 /* ------------------------------------------------------------------ */
 /* Auth: sign in / create account                                       */
@@ -201,7 +210,7 @@ function setAuthMode(mode) {
   $('auth-title').textContent = mode === 'login' ? 'Good to see you again' : 'Make yourself at home';
   $('auth-sub').textContent =
     mode === 'login'
-      ? 'Your people are already here. Jump back in.'
+      ? 'Your servers are waiting for you.'
       : "Pick a name — it's how people will find you.";
   $('auth-submit').textContent = mode === 'login' ? 'Sign in' : 'Create account';
   $('auth-password2').classList.toggle('hidden', mode !== 'signup');
@@ -325,22 +334,57 @@ socket.on('disconnect', () => {
 
 socket.on('init', (data) => {
   state.me = data.me;
-  state.channels = data.channels;
-  state.users = data.users;
-  state.participants = data.voice;
+  state.servers = data.servers || [];
+  state.channels = data.channels || [];
+  state.users = data.users || [];
+  state.participants = data.voice || [];
+
+  // pick which server to show: the one we just created → saved choice → first server → none
+  let saved = null;
+  try { saved = localStorage.getItem(SERVER_KEY); } catch (_) {}
+  if (!state.servers.some((s) => s.id === saved)) saved = null;
+  state.activeServerId = saved || (state.servers[0] && state.servers[0].id) || null;
+  if (pendingServerSwitch && state.servers.some((s) => s.id === pendingServerSwitch)) {
+    state.activeServerId = pendingServerSwitch;
+    try { localStorage.setItem(SERVER_KEY, pendingServerSwitch); } catch (_) {}
+    pendingServerSwitch = null;
+  }
+
+  renderServers();
   renderChannels();
   renderMembers();
+  updateServerChrome();
   $('me-avatar').textContent = initial(data.me.name);
   $('me-avatar').style.background = gradientFor(data.me.color);
   $('me-name').textContent = data.me.name;
   $('me-status').textContent = 'Online';
-  if (!state.activeText || !channelById(state.activeText)) {
-    const firstText = state.channels.find((c) => c.type === 'text');
-    if (firstText) openChannel(firstText.id);
-  } else {
-    openChannel(state.activeText);
+  if (state.activeServerId) {
+    const mine = myChannels();
+    if (!state.activeText || !mine.some((c) => c.id === state.activeText)) {
+      const firstText = mine.find((c) => c.type === 'text');
+      if (firstText) openChannel(firstText.id);
+    } else {
+      openChannel(state.activeText);
+    }
   }
   if (voice.channel) renderVoiceParticipants();
+
+  // redeem ?invite= once, after the session is live
+  if (!inviteRedeemed) {
+    inviteRedeemed = true;
+    const invite = new URLSearchParams(location.search).get('invite');
+    if (invite) {
+      postJson('/api/servers/join', { token: currentToken(), invite }).then((res) => {
+        try {
+          const url = new URL(location.href);
+          url.searchParams.delete('invite');
+          history.replaceState(null, '', url);
+        } catch (_) {}
+        if (res.ok) toast(`Joined “${res.data.server.name}”`, 'success');
+        else toast(res.data.error || 'Invite not found.', 'error');
+      });
+    }
+  }
 });
 
 socket.on('channels', (channels) => {
@@ -444,6 +488,161 @@ $('voice-join-confirm').addEventListener('click', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Servers — rail, switching, chrome, add/invite/leave modals         */
+/* ------------------------------------------------------------------ */
+
+const initials = (name) => {
+  const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
+  const word = parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || '?').slice(0, 2);
+  return word.toUpperCase();
+};
+
+async function postJson(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { ok: r.ok, data: await r.json().catch(() => ({})) };
+  } catch (err) {
+    return { ok: false, data: { error: err.message } };
+  }
+}
+
+function renderServers() {
+  const list = $('server-list');
+  if (!list) return;
+  list.innerHTML = '';
+  for (const srv of state.servers) {
+    const el = document.createElement('button');
+    el.className = 'rail-icon server-rail-item' + (srv.id === state.activeServerId ? ' active' : '');
+    el.style.background = srv.color;
+    el.dataset.id = srv.id;
+    el.textContent = initials(srv.name);
+    el.title = srv.name;
+    el.addEventListener('click', () => switchServer(srv.id));
+    list.appendChild(el);
+  }
+}
+
+function switchServer(id) {
+  if (state.activeServerId === id) return;
+  if (!state.servers.some((s) => s.id === id)) return;
+  state.activeServerId = id;
+  try { localStorage.setItem(SERVER_KEY, id); } catch (_) {}
+  state.activeText = null;
+  typingMap.forEach((t) => clearTimeout(t.timeout));
+  typingMap.clear();
+  renderTyping();
+  renderServers();
+  renderChannels();
+  renderMembers();
+  updateServerChrome();
+  const firstText = myChannels().find((c) => c.type === 'text');
+  if (firstText) openChannel(firstText.id);
+}
+
+function updateServerChrome() {
+  const hasServer = !!state.activeServerId;
+  $('no-server-state').classList.toggle('hidden', hasServer);
+  $('app').classList.toggle('no-servers', !hasServer);
+  const srv = activeServer();
+  $('server-name').textContent = srv ? srv.name : 'Sold';
+  $('server-invite-btn').style.display = hasServer ? '' : 'none';
+  $('leave-server-btn').style.display = hasServer ? '' : 'none';
+  $('add-channel-btn-2').style.display = hasServer ? '' : 'none';
+}
+
+/* -------- add-a-server modal -------- */
+function openAddServer(focus) {
+  $('add-server-overlay').classList.remove('hidden');
+  const target = focus === 'join' ? $('join-invite-input') : $('new-server-name');
+  setTimeout(() => target.focus(), 50);
+}
+function closeAddServer() {
+  $('add-server-overlay').classList.add('hidden');
+}
+$('add-server-btn').addEventListener('click', () => openAddServer('create'));
+$('ns-create').addEventListener('click', () => openAddServer('create'));
+$('ns-join').addEventListener('click', () => openAddServer('join'));
+$('add-server-close').addEventListener('click', closeAddServer);
+$('add-server-overlay').addEventListener('click', (e) => {
+  if (e.target === $('add-server-overlay')) closeAddServer();
+});
+
+$('add-server-create-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('new-server-name');
+  const name = input.value.trim();
+  if (name.length < 2) return toast('Name it at least 2 characters.', 'error');
+  const res = await postJson('/api/servers/create', { token: currentToken(), name });
+  if (!res.ok) return toast(res.data.error || 'Could not create the server.', 'error');
+  pendingServerSwitch = res.data.server.id;
+  input.value = '';
+  closeAddServer();
+  toast(`Created “${res.data.server.name}”`, 'success');
+});
+
+$('add-server-join-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('join-invite-input');
+  const invite = input.value.trim();
+  if (!invite) return toast('Enter an invite code.', 'error');
+  const res = await postJson('/api/servers/join', { token: currentToken(), invite });
+  if (!res.ok) return toast(res.data.error || 'Could not join.', 'error');
+  input.value = '';
+  closeAddServer();
+  toast(`Welcome to “${res.data.server.name}”`, 'success');
+});
+
+/* -------- invite modal -------- */
+function openInvite() {
+  const srv = activeServer();
+  if (!srv) return;
+  $('invite-server-name').textContent = srv.name;
+  $('invite-code').textContent = srv.invite;
+  $('invite-link').value = `${location.origin}/?invite=${srv.invite}`;
+  $('invite-overlay').classList.remove('hidden');
+}
+function closeInvite() {
+  $('invite-overlay').classList.add('hidden');
+}
+$('server-invite-btn').addEventListener('click', openInvite);
+$('invite-done').addEventListener('click', closeInvite);
+$('invite-overlay').addEventListener('click', (e) => {
+  if (e.target === $('invite-overlay')) closeInvite();
+});
+$('copy-invite-btn').addEventListener('click', async () => {
+  const link = $('invite-link').value;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Invite link copied', 'success');
+  } catch (_) {
+    $('invite-link').select();
+    try { document.execCommand('copy'); } catch (_) {}
+    toast('Invite link copied', 'success');
+  }
+});
+
+/* -------- leave server -------- */
+$('leave-server-btn').addEventListener('click', async () => {
+  const srv = activeServer();
+  if (!srv) return;
+  let myName = '';
+  try { myName = (localStorage.getItem('sold-username') || '').toLowerCase(); } catch (_) {}
+  if (srv.owner === myName) {
+    toast('You own this server — owners can\'t leave yet.', 'error');
+    return;
+  }
+  if (!window.confirm(`Leave “${srv.name}”? You can rejoin later with the invite code.`)) return;
+  const res = await postJson('/api/servers/leave', { token: currentToken(), serverId: srv.id });
+  if (!res.ok) return toast(res.data.error || 'Could not leave.', 'error');
+  try { localStorage.removeItem(SERVER_KEY); } catch (_) {}
+  toast(`Left “${srv.name}”`, 'success');
+});
+
+/* ------------------------------------------------------------------ */
 /* Channels                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -453,7 +652,7 @@ function renderChannels() {
   textWrap.innerHTML = '';
   voiceWrap.innerHTML = '';
 
-  for (const ch of state.channels) {
+  for (const ch of myChannels()) {
     const el = document.createElement('div');
     const missed = unreadMap.get(ch.id) || 0;
     el.className =
@@ -788,8 +987,9 @@ function renderMembers() {
   const list = $('member-list');
   if (!list) return;
   list.innerHTML = '';
-  const inVoice = new Set(state.participants.map((p) => p.id));
-  const sorted = [...state.users].sort((a, b) => Number(inVoice.has(b.id)) - Number(inVoice.has(a.id)) || a.name.localeCompare(b.name));
+  const members = myMembers();
+  const inVoice = new Set(myParticipants().map((p) => p.id));
+  const sorted = [...members].sort((a, b) => Number(inVoice.has(b.id)) - Number(inVoice.has(a.id)) || a.name.localeCompare(b.name));
   $('member-count').textContent = sorted.length;
 
   const label = document.createElement('div');
@@ -828,7 +1028,6 @@ function openCreateModal() {
 }
 function closeCreateModal() { $('create-overlay').classList.add('hidden'); }
 
-$('add-channel-btn').addEventListener('click', openCreateModal);
 $('add-channel-btn-2').addEventListener('click', openCreateModal);
 $('create-cancel').addEventListener('click', closeCreateModal);
 $('create-overlay').addEventListener('click', (e) => { if (e.target === $('create-overlay')) closeCreateModal(); });
@@ -844,7 +1043,8 @@ document.querySelectorAll('.type-btn').forEach((btn) => {
 function submitCreate() {
   const name = $('channel-name-input').value;
   if (!name.trim()) return;
-  socket.emit('channel:create', { name, type: createType });
+  if (!state.activeServerId) return;
+  socket.emit('channel:create', { name, type: createType, serverId: state.activeServerId });
   closeCreateModal();
 }
 $('create-btn').addEventListener('click', submitCreate);
@@ -1423,6 +1623,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeCreateModal();
     closeJoinModal();
+    closeAddServer();
+    closeInvite();
     emojiPicker.classList.add('hidden');
   }
 });

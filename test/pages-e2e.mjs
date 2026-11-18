@@ -129,6 +129,14 @@ async function main() {
   // second, distinct account for peer B — same-account tabs get renamed ("name 2")
   const suBob = await api('/api/signup', { username: bobName, password });
 
+  // servers: alice creates one, bob joins it via invite (shared room)
+  const create = await api('/api/servers/create', { token: li.data.token, name: 'Pages E2E Lab' });
+  check('create server through Pages',
+    create.status === 200 && !!create.data.server?.invite,
+    `status=${create.status}`);
+  const joinRes = await api('/api/servers/join', { token: suBob.data.token, invite: create.data.server?.invite });
+  check('second account joins via invite', joinRes.status === 200, `status=${joinRes.status}`);
+
   /* ---------------- websocket transport ----------------------------------- */
   const a = new Client('A');
   const b = new Client('B');

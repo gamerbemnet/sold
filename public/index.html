@@ -28,6 +28,8 @@
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-invite" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07 0l3-3A5 5 0 0 0 13 2.93l-1.5 1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-leave" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
   <!-- Auth overlay: sign in / create account -->
@@ -65,6 +67,43 @@
     </div>
   </div>
 
+  <!-- Add server modal -->
+  <div id="add-server-overlay" class="overlay hidden">
+    <div class="modal add-server-modal">
+      <h2>Add a server</h2>
+      <p class="add-server-sub">A private room shared only with the people you invite.</p>
+      <form id="add-server-create-form" class="add-server-form">
+        <label class="field-label" for="new-server-name">Start a new server</label>
+        <input id="new-server-name" type="text" maxlength="32" placeholder="Friday Night Squad" autocomplete="off" />
+        <button type="submit" class="btn-primary">Create server</button>
+      </form>
+      <div class="add-server-sep"><span>or</span></div>
+      <form id="add-server-join-form" class="add-server-form">
+        <label class="field-label" for="join-invite-input">Join with an invite code</label>
+        <input id="join-invite-input" type="text" maxlength="16" placeholder="b7281211" autocomplete="off" spellcheck="false" />
+        <button type="submit" class="btn-ghost">Join server</button>
+      </form>
+      <button id="add-server-close" class="btn-ghost close-x" title="Close">&times;</button>
+    </div>
+  </div>
+
+  <!-- Invite modal -->
+  <div id="invite-overlay" class="overlay hidden">
+    <div class="modal invite-modal">
+      <h2 id="invite-title">Invite people</h2>
+      <p class="invite-desc">Anyone with this link can join <strong id="invite-server-name">your server</strong>.</p>
+      <div class="invite-link-row">
+        <input id="invite-link" type="text" readonly />
+        <button id="copy-invite-btn" class="btn-primary">Copy</button>
+      </div>
+      <div class="invite-or"><span>or share the code</span></div>
+      <div id="invite-code" class="invite-code">code</div>
+      <div class="modal-actions">
+        <button id="invite-done" class="btn-ghost">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Create channel modal -->
   <div id="create-overlay" class="overlay hidden">
     <div class="modal">
@@ -84,16 +123,20 @@
   <div id="app" class="app">
     <!-- Server rail -->
     <nav class="server-rail">
-      <div class="rail-icon blurple" title="Sold">S</div>
+      <div id="server-list" class="server-list"></div>
       <div class="rail-sep"></div>
-      <button class="rail-icon add" id="add-channel-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <button class="rail-icon add" id="add-server-btn" title="Add a server"><svg class="icon"><use href="#i-plus"/></svg></button>
     </nav>
 
     <!-- Channel sidebar -->
     <aside class="channel-sidebar">
       <header class="sidebar-header">
-        <span class="head-left"><span id="server-name">Sold</span><span class="chev">&#9662;</span></span>
-        <button id="add-channel-btn-2" class="icon-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
+        <span class="head-left"><span id="server-name">Sold</span></span>
+        <div class="sidebar-actions">
+          <button id="server-invite-btn" class="icon-btn" title="Copy invite link"><svg class="icon"><use href="#i-invite"/></svg></button>
+          <button id="leave-server-btn" class="icon-btn" title="Leave server"><svg class="icon"><use href="#i-leave"/></svg></button>
+          <button id="add-channel-btn-2" class="icon-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
+        </div>
       </header>
 
       <div class="channels-scroll">
@@ -123,6 +166,17 @@
 
     <!-- Main column -->
     <main class="main">
+      <!-- No-server empty state (fresh account with no invites yet) -->
+      <div id="no-server-state" class="no-server hidden">
+        <div class="no-server-logo">S</div>
+        <h1>Welcome to Sold</h1>
+        <p>Private rooms for you and your people. Create a server, or ask a friend for their invite code.</p>
+        <div class="no-server-actions">
+          <button id="ns-create" class="btn-primary">Create a server</button>
+          <button id="ns-join" class="btn-ghost">Join with invite</button>
+        </div>
+      </div>
+
       <!-- Voice call panel -->
       <section id="voice-panel" class="voice-panel hidden">
         <div class="voice-toolbar">
