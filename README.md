@@ -2,10 +2,26 @@
 
 *(formerly "Confide"; GitHub repo `sold`, hosted on Cloudflare Pages)*
 
-A browser-based Discord clone: server/channel sidebar, real-time text chat with
-typing indicators, and WebRTC voice/video rooms with screen sharing.
+A private, Discord-style chat: invite-only servers, real-time text chat with
+typing indicators, and WebRTC voice/video rooms with screen sharing. New
+accounts start with **no servers** — you create your own or join one with an
+invite code, and nobody else can see in.
 
 ## Features
+
+**Private servers**
+- Discord-style servers: own channel list, own member list, own invite code
+- Create a server (5 seeded channels) or join one with an 8-character invite code
+- Invite links (`https://<host>/?invite=CODE`) — sign in and you land straight
+  in the server
+- Everything is scoped server-side: history, messages, reactions, typing,
+  member presence and voice rooms never cross a server boundary
+- No-publics by design: fresh accounts see nothing until they create or are
+  invited to a server
+- Switch servers from the icon rail; leave with one click (owners can't orphan
+  a server); servers persist to `data/servers.json`
+- On upgrade from pre-server versions, existing global channels are migrated
+  into a "Sold" server containing the existing accounts
 
 **Accounts**
 - Sign up / sign in with username + password (scrypt-hashed, per-account color)
@@ -134,18 +150,24 @@ node test/protocol-test.mjs    # or: npm test
 node test/pages-e2e.mjs        # end-to-end test of the deployed Pages site
 ```
 
-25-check end-to-end test over raw Socket.IO/WebSocket, including auth
-(signup, duplicate username, wrong password, login, tokenless-join rejection).
+36-check end-to-end test over raw Socket.IO/WebSocket. The test spawns its
+**own** server in a throwaway data directory, so it never touches your real
+accounts or messages.
 
-Covers: signup/login/logout (incl. duplicate username, wrong password, and
-tokenless-join rejection), connect, join/init, message delivery & history,
-typing, emoji reactions (add + toggle off), channel creation, voice join/peer
-discovery, SDP & ICE relay, voice state broadcast, leave and disconnect handling.
+Covers: signup/login (incl. duplicate username, wrong password, tokenless-join
+rejection), fresh accounts starting serverless, server creation with 5 seeded
+channels + invite code, joining via invite (and rejection of bogus invites),
+message delivery & history, typing, emoji reactions (add + toggle off),
+channel creation, voice join/peer discovery, SDP & ICE relay, voice state
+broadcast, cross-server isolation probes (an outsider account cannot open
+history, post, or join voice), leave/rejoin, and disconnect handling.
 
-`test/pages-e2e.mjs` re-runs the critical path through the public URL (15
-checks): static serving, worker proxy (auth API + TURN credentials),
-WebSocket transport through Pages, message/typing/reaction relay and WebRTC
-signaling relay — proving the hosted deployment end to end.
+`test/pages-e2e.mjs` re-runs the critical path through the public URL
+(17 checks): static serving, worker proxy (auth API + TURN credentials),
+server creation + invite join, WebSocket transport through Pages,
+message/typing/reaction relay and WebRTC signaling relay — proving the hosted
+deployment end to end. Note: it creates throwaway accounts on the live
+instance — prune them afterwards if the instance is single-tenant.
 
 TURN diagnostics (require network access):
 
@@ -165,10 +187,13 @@ public/app.js      Client: auth flow, chat rendering, WebRTC peers, media contro
 pages-build/_worker.js  Pages advanced-mode worker: proxies /api + /socket.io to the ORIGIN env var
 scripts/deploy-pages.mjs  Deploy to Cloudflare Pages (hash + upload + ORIGIN env + deployment)
 data/accounts.json Persisted credentials + session tokens (created on first signup)
-test/protocol-test.mjs  End-to-end protocol test (no extra deps)
+data/servers.json  Persisted servers, members, invites and channels
+test/protocol-test.mjs  End-to-end protocol test (spawns its own server, no extra deps)
 test/pages-e2e.mjs  End-to-end test of the deployed Pages site (HTTP + WebSocket)
 test/turn-cloudflare.cjs  Verifies Cloudflare TURN allocation end-to-end
 ```
 
-Channels, messages and voice state are in-memory: restarting the server
-resets them. Accounts and sessions are persisted to `data/accounts.json`.
+Channels, servers, accounts and sessions persist to `data/` — back that
+directory up. Message history and voice state are in-memory: restarting the
+server resets them. Set `SOLD_DATA_DIR` to relocate the data directory (used
+by the test suite).
