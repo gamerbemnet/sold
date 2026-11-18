@@ -87,7 +87,7 @@ function toast(text, type) {
   el.className = 'toast' + (type ? ' ' + type : '');
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('show'), 2600);
+  el._t = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
 const initial = (name) => (name || '?').trim().charAt(0).toUpperCase() || '?';
@@ -769,16 +769,18 @@ function renderMembers() {
 
   for (const u of sorted) {
     const el = document.createElement('div');
+    const isMe = u.id === socket.id;
     el.className =
       'member' +
       (inVoice.has(u.id) ? ' in-voice' : '') +
-      (speakingSet.has(u.id) ? ' speaking' : '');
+      (speakingSet.has(u.id) ? ' speaking' : '') +
+      (isMe ? ' me' : '');
     el.dataset.id = u.id;
     el.innerHTML =
       `<div class="member-avatar" style="background:${gradientFor(u.color)}">${initial(u.name)}` +
       `<span class="status-dot"></span></div>` +
-      `<div class="member-name">${escapeHtml(u.name)}${u.id === socket.id ? ' (you)' : ''}</div>` +
-      (inVoice.has(u.id) ? `<div class="member-voice-tag">&#128172; voice</div>` : '');
+      `<div class="member-name">${escapeHtml(u.name)}${isMe ? '<span class="you-badge">you</span>' : ''}</div>` +
+      (inVoice.has(u.id) ? `<div class="member-voice-tag"><span class="voice-dot"></span> Voice</div>` : '');
     list.appendChild(el);
   }
 }
@@ -1291,9 +1293,9 @@ function updateConnLabel() {
   if (!voice.channel) return;
   const total = state.participants.filter((p) => p.channel === voice.channel).length;
   const connected = [...voice.peers.values()].filter((p) => p.connected).length;
-  if (!voice.peers.size) el.textContent = `You're in — waiting for the others (${total} here)`;
-  else if (connected === voice.peers.size) el.textContent = `You're in the call — ${connected + 1} people`;
-  else el.textContent = `Connecting… ${connected} of ${voice.peers.size} connected`;
+  if (!voice.peers.size) el.textContent = `You are in — ${total === 1 ? 'just you' : `waiting for ${total - 1} more`}`;
+  else if (connected === voice.peers.size) el.textContent = `Connected — ${connected + 1} ${connected === 0 ? 'person' : 'people'}`;
+  else el.textContent = `Connecting… ${connected}/${voice.peers.size} ready`;
 }
 
 /* ---------------- tiles ---------------- */

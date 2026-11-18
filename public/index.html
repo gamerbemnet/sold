@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="Sold — real-time text chat plus WebRTC voice, video and screen-share rooms, right in your browser." />
-  <meta name="theme-color" content="#313338" />
+  <meta name="theme-color" content="#261f31" />
   <title>Sold — voice, video &amp; chat</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%235865f2'/%3E%3Ctext x='32' y='43' font-family='Segoe UI,Arial' font-size='34' font-weight='700' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'%3E%3Cstop offset='0%' stop-color='%23ff7a59'/%3E%3Cstop offset='100%' stop-color='%23c084fc'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='Segoe UI,Arial' font-size='34' font-weight='800' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -29,7 +29,7 @@
       <input id="auth-password2" class="hidden" type="password" maxlength="100" placeholder="Confirm password" autocomplete="new-password" />
 
       <button id="auth-submit" class="btn-primary">Sign in</button>
-      <p class="hint">Chat, voice and video — right here in your browser, no downloads.</p>
+      <p class="hint">Text, voice, video — all in your browser. No downloads, no accounts sold.</p>
     </div>
   </div>
 
@@ -37,7 +37,7 @@
   <div id="create-overlay" class="overlay hidden">
     <div class="modal">
       <h2>Create channel</h2>
-      <input id="channel-name-input" type="text" maxlength="24" placeholder="new-channel" autocomplete="off" />
+      <input id="channel-name-input" type="text" maxlength="24" placeholder="cool-channel" autocomplete="off" />
       <div class="type-toggle">
         <button class="type-btn active" data-type="text"># Text</button>
         <button class="type-btn" data-type="voice">&#127908; Voice</button>
