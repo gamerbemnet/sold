@@ -3,6 +3,8 @@
 /* ================================================================== */
 
 const $ = (id) => document.getElementById(id);
+const icon = (id, cls) =>
+  `<svg class="icon${cls ? ' ' + cls : ''}"><use href="#i-${id}"/></svg>`;
 
 const socket = io();
 
@@ -414,6 +416,34 @@ socket.on('voice:leave', ({ peerId }) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Voice join confirmation — don't drop users into a room instantly    */
+/* ------------------------------------------------------------------ */
+
+let pendingVoiceChannel = null;
+
+function confirmJoinVoice(ch) {
+  pendingVoiceChannel = ch;
+  $('voice-join-title').innerHTML = icon('mic') + ' Join &ldquo;' + escapeHtml(ch.name) + '&rdquo;?';
+  $('voice-join-desc').textContent =
+    'You will be able to talk and screen-share with everyone in this voice channel. You can leave any time.';
+  $('voice-join-overlay').classList.remove('hidden');
+  setTimeout(() => $('voice-join-confirm').focus(), 50);
+}
+function closeJoinModal() {
+  $('voice-join-overlay').classList.add('hidden');
+  pendingVoiceChannel = null;
+}
+$('voice-join-overlay').addEventListener('click', (e) => {
+  if (e.target === $('voice-join-overlay')) closeJoinModal();
+});
+$('voice-join-cancel').addEventListener('click', closeJoinModal);
+$('voice-join-confirm').addEventListener('click', () => {
+  const ch = pendingVoiceChannel;
+  closeJoinModal();
+  if (ch) joinVoice(ch.id);
+});
+
+/* ------------------------------------------------------------------ */
 /* Channels                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -438,13 +468,13 @@ function renderChannels() {
     const hint = ch.type === 'voice' ? '<span class="join-hint">Join</span>' : '';
 
     el.innerHTML =
-      `<span class="ch-icon">${ch.type === 'voice' ? '&#127908;' : '#'}</span>` +
+      `<span class="ch-icon">${ch.type === 'voice' ? icon('mic') : '#'}</span>` +
       `<span class="ch-name">${escapeHtml(ch.name)}</span>` +
       badge + hint;
 
     el.addEventListener('click', () => {
       if (ch.type === 'text') openChannel(ch.id);
-      else joinVoice(ch.id);
+      else confirmJoinVoice(ch);
     });
 
     if (ch.type === 'text') textWrap.appendChild(el);
@@ -459,8 +489,8 @@ function renderChannels() {
           `<span class="vu-dot" style="background:${p.color}"></span>` +
           `<span class="vu-name">${escapeHtml(p.name)}</span>` +
           `<span class="vu-flags">` +
-          `${p.audio ? '' : '<span class="off">&#128263;</span>'}` +
-          `${p.screen ? ' &#128247;' : ''}` +
+          `${p.audio ? '' : '<span class="off">' + icon('mic-off') + '</span>'}` +
+          `${p.screen ? ' ' + icon('screen') : ''}` +
           `</span>`;
         voiceWrap.appendChild(u);
       });
@@ -993,7 +1023,8 @@ function leaveVoice(silent) {
   $('voice-panel').classList.add('hidden');
   $('voice-panel').classList.remove('expanded');
   document.querySelector('.main').classList.remove('voice-expanded');
-  $('btn-expand').textContent = '\u26f6';
+  $('btn-expand').innerHTML = icon('expand');
+  $('btn-expand').title = 'Maximize call';
   $('btn-expand').title = 'Maximize call';
   stopAudioMonitors();
   if (wasChannel && !silent) socket.emit('voice:leave');
@@ -1264,7 +1295,7 @@ $('btn-expand').addEventListener('click', () => {
   const panel = $('voice-panel');
   const on = panel.classList.toggle('expanded');
   document.querySelector('.main').classList.toggle('voice-expanded', on);
-  $('btn-expand').textContent = on ? '\u25a9' : '\u26f6';
+  $('btn-expand').innerHTML = icon(on ? 'shrink' : 'expand');
   $('btn-expand').title = on ? 'Show chat' : 'Maximize call';
   $('btn-expand').classList.toggle('active', false);
 });
@@ -1358,8 +1389,8 @@ function updateTilesFromState() {
     if (nameEl) {
       nameEl.innerHTML =
         `${escapeHtml(p.id === socket.id ? 'You' : p.name)}` +
-        (p.audio ? '' : ' <span class="muted-ico">&#128263;</span>') +
-        (p.screen ? ' &#128247;' : '');
+        (p.audio ? '' : ' ' + icon('mic-off', 'muted-ico')) +
+        (p.screen ? ' ' + icon('screen') : '');
     }
 
     const fallback = tile.querySelector('.tile-fallback');
@@ -1391,6 +1422,7 @@ function updateTilesFromState() {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeCreateModal();
+    closeJoinModal();
     emojiPicker.classList.add('hidden');
   }
 });

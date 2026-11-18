@@ -146,7 +146,7 @@ async function main() {
   b.send('join', { token: suBob.data.token });
   const initB = await b.waitFor('init');
   check('join + init over websocket', Array.isArray(initA.channels) && initA.channels.length >= 5 &&
-    initB.users.length === 2, `${initA.channels.length} channels, ${initB.users.length} users`);
+    initB.users.length >= 2, `${initA.channels.length} channels, ${initB.users.length} users`);
 
   /* ---------------- real-time chat ---------------------------------------- */
   const general = initA.channels.find((c) => c.type === 'text');

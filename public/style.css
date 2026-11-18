@@ -741,3 +741,26 @@ input { font-family: inherit; }
   .msg-actions:hover, .msg-actions:focus-within { opacity: 1; }
   .msg-act { width: 30px; height: 30px; }
 }
+
+/* ---------- inline icons ---------- */
+.icon {
+  width: 20px; height: 20px;
+  display: inline-block; vertical-align: middle;
+  fill: none; overflow: visible;
+}
+.icon-btn .icon, .hdr-btn .icon { width: 19px; height: 19px; }
+.round-btn .icon { width: 18px; height: 18px; }
+.ch-icon .icon { width: 17px; height: 17px; }
+.vu-flags .icon { width: 13px; height: 13px; }
+.muted-ico, .screen-ico { opacity: .85; }
+.msg-hero .hero-icon .icon,
+.hero-icon .icon { width: 34px; height: 34px; }
+.tile-name .icon { width: 13px; height: 13px; }
+.btn-primary .icon, .vc-icon .icon { width: 18px; height: 18px; }
+
+/* voice join confirmation */
+.voice-join-modal { text-align: center; width: 380px; }
+.voice-join-modal h2 { font-size: 20px; margin-bottom: 10px; letter-spacing: -.3px; }
+.voice-join-modal h2 .icon { width: 22px; height: 22px; margin-right: 6px; color: var(--blurple); }
+.voice-join-modal p { color: var(--text-muted); font-size: 14px; margin-bottom: 18px; }
+.voice-join-modal .modal-actions { justify-content: center; }

@@ -10,6 +10,26 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- shared inline icons (feather-like) -->
+  <svg id="icons" width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-mic-off" viewBox="0 0 24 24"><path d="M2 2l20 20M9 5.5V5a3 3 0 0 1 5.4 2L15 9M15 12a3 3 0 0 1-4.4 2.6M5 10v1a7 7 0 0 0 10.7 5.9M12 18v4M8 22h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9v6h4l6 5V4L8 9H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M17.5 8.5a5 5 0 0 1 0 7M20 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-cam" viewBox="0 0 24 24"><rect x="2" y="6" width="13" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 10.5 22 7v10l-7-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 21h8M12 17v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M3 9h6V3M21 9h-6V3M3 15h6v6M21 15h-6v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 11.91a16 16 0 0 0 4 4l3.27-1.22a2 2 0 0 1 2.11.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.3-4.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  </svg>
+
   <!-- Auth overlay: sign in / create account -->
   <div id="login-overlay" class="overlay auth-overlay hidden">
     <div class="modal login-modal">
@@ -33,6 +53,18 @@
     </div>
   </div>
 
+  <!-- Voice join confirmation -->
+  <div id="voice-join-overlay" class="overlay hidden">
+    <div class="modal voice-join-modal">
+      <h2 id="voice-join-title">Join this voice channel?</h2>
+      <p id="voice-join-desc">You'll be able to talk with everyone in the room.</p>
+      <div class="modal-actions">
+        <button id="voice-join-cancel" class="btn-ghost">Cancel</button>
+        <button id="voice-join-confirm" class="btn-primary">Join voice</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Create channel modal -->
   <div id="create-overlay" class="overlay hidden">
     <div class="modal">
@@ -40,7 +72,7 @@
       <input id="channel-name-input" type="text" maxlength="24" placeholder="cool-channel" autocomplete="off" />
       <div class="type-toggle">
         <button class="type-btn active" data-type="text"># Text</button>
-        <button class="type-btn" data-type="voice">&#127908; Voice</button>
+        <button class="type-btn" data-type="voice"><svg class="icon"><use href="#i-mic"/></svg>Voice</button>
       </div>
       <div class="modal-actions">
         <button id="create-cancel" class="btn-ghost">Cancel</button>
@@ -54,14 +86,14 @@
     <nav class="server-rail">
       <div class="rail-icon blurple" title="Sold">S</div>
       <div class="rail-sep"></div>
-      <button class="rail-icon add" id="add-channel-btn" title="Create channel">+</button>
+      <button class="rail-icon add" id="add-channel-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
     </nav>
 
     <!-- Channel sidebar -->
     <aside class="channel-sidebar">
       <header class="sidebar-header">
         <span class="head-left"><span id="server-name">Sold</span><span class="chev">&#9662;</span></span>
-        <button id="add-channel-btn-2" class="icon-btn" title="Create channel">+</button>
+        <button id="add-channel-btn-2" class="icon-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
       </header>
 
       <div class="channels-scroll">
@@ -82,9 +114,9 @@
           <div class="me-status" id="me-status">Online</div>
         </div>
         <div class="user-controls">
-          <button id="panel-mute" class="icon-btn" title="Mute">&#127908;</button>
-          <button id="panel-deafen" class="icon-btn" title="Deafen">&#128266;</button>
-          <button id="panel-logout" class="icon-btn" title="Log out">&#8617;</button>
+          <button id="panel-mute" class="icon-btn" title="Mute"><svg class="icon"><use href="#i-mic"/></svg></button>
+          <button id="panel-deafen" class="icon-btn" title="Deafen"><svg class="icon"><use href="#i-speaker"/></svg></button>
+          <button id="panel-logout" class="icon-btn" title="Log out"><svg class="icon"><use href="#i-logout"/></svg></button>
         </div>
       </footer>
     </aside>
@@ -98,11 +130,11 @@
           <span class="voice-live-dot"></span>
           <span class="voice-conn" id="voice-conn">Connecting…</span>
           <div class="spacer"></div>
-          <button id="btn-mute" class="round-btn" title="Mute microphone">&#127908;</button>
-          <button id="btn-camera" class="round-btn" title="Toggle camera">&#127909;</button>
-          <button id="btn-screen" class="round-btn" title="Share screen">&#128247;</button>
-          <button id="btn-expand" class="round-btn" title="Maximize call">&#9974;</button>
-          <button id="btn-leave" class="round-btn danger" title="Disconnect">&#128222;</button>
+          <button id="btn-mute" class="round-btn" title="Mute microphone"><svg class="icon"><use href="#i-mic"/></svg></button>
+          <button id="btn-camera" class="round-btn" title="Toggle camera"><svg class="icon"><use href="#i-cam"/></svg></button>
+          <button id="btn-screen" class="round-btn" title="Share screen"><svg class="icon"><use href="#i-screen"/></svg></button>
+          <button id="btn-expand" class="round-btn" title="Maximize call"><svg class="icon"><use href="#i-expand"/></svg></button>
+          <button id="btn-leave" class="round-btn danger" title="Disconnect"><svg class="icon"><use href="#i-phone"/></svg></button>
         </div>
         <div id="video-grid" class="video-grid"></div>
       </section>
@@ -118,9 +150,9 @@
           <div class="chat-header-actions">
             <div class="search-box">
               <input id="search-input" type="text" placeholder="Search" autocomplete="off" maxlength="100" />
-              <span class="search-ico">&#128269;</span>
+              <span class="search-ico"><svg class="icon"><use href="#i-search"/></svg></span>
             </div>
-            <button id="toggle-members" class="icon-btn hdr-btn on" title="Toggle member list">&#128101;</button>
+            <button id="toggle-members" class="icon-btn hdr-btn on" title="Toggle member list"><svg class="icon"><use href="#i-users"/></svg></button>
           </div>
         </header>
 
@@ -133,12 +165,12 @@
             <span id="filter-text">Showing matches…</span>
             <button id="filter-clear" type="button">Clear</button>
           </div>
-          <button id="jump-btn" class="jump-btn hidden" title="Jump to latest">&#8595;</button>
+          <button id="jump-btn" class="jump-btn hidden" title="Jump to latest"><svg class="icon"><use href="#i-down"/></svg></button>
           <div id="emoji-picker" class="emoji-picker hidden"></div>
           <div class="composer">
-            <button id="emoji-btn" class="icon-btn" title="Emoji">&#128512;</button>
+            <button id="emoji-btn" class="icon-btn" title="Emoji"><svg class="icon"><use href="#i-smile"/></svg></button>
             <input id="message-input" type="text" placeholder="Message #" autocomplete="off" maxlength="2000" />
-            <button id="send-btn" class="icon-btn send-btn" title="Send">&#10148;</button>
+            <button id="send-btn" class="icon-btn send-btn" title="Send"><svg class="icon"><use href="#i-send"/></svg></button>
           </div>
         </div>
       </section>
