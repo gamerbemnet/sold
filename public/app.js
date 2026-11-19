@@ -2179,5 +2179,9 @@ try {
 setAuthMode('login');
 updateControls();
 
+// fresh visit: open the stream if we hold a session (hello -> bootstrap),
+// otherwise land on the auth screen — never strand the user on an empty shell
+if (currentToken()) joinWithToken(); else showLogin();
+
 // keep presence fresh on the backend (its 90s sweep drops silent clients)
 setInterval(() => { if (socket.connected) socket.emit('heartbeat', {}); }, 25000);
