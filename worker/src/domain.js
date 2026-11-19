@@ -24,6 +24,10 @@ export function emitToDmPair(st, ctx, pair, event, payload) {
 /* ---------------- servers / channels ---------------- */
 
 export const channelById = (st, id) => st.channelIndex.get(id);
+export const avatarAtFor = (st, username) => {
+  const acc = st.accounts.get(LOWER(username));
+  return (acc && acc.avatarAt) || 0;
+};
 export const serversFor = (st, username) =>
   [...st.servers.values()].filter((s) => s.members.includes(LOWER(username)));
 export const memberOfServer = (st, username, serverId) => {
@@ -41,6 +45,7 @@ export const channelsForUser = (st, username) => {
 export const publicServer = (s) => ({
   id: s.id, name: s.name, color: s.color, owner: s.owner,
   invite: s.invite, members: [...s.members], createdAt: s.createdAt,
+  bannerAt: s.bannerAt || 0,
 });
 
 /* ---------------- presence / voice ---------------- */
@@ -51,10 +56,11 @@ export const voiceParticipants = (st) =>
   Object.values(st.presence)
     .filter((u) => u.voiceRoom)
     .map((u) => ({
-      id: u.id, name: u.name, color: u.color,
+      id: u.id, name: u.name, color: u.color, username: u.username,
       channel: u.voiceRoom,
       serverId: (st.channelIndex.get(u.voiceRoom) || {}).serverId || null,
       audio: u.audio, video: u.video, screen: u.screen,
+      avatarAt: avatarAtFor(st, u.username),
     }));
 export const scopedVoiceFor = (st, username) =>
   voiceParticipants(st).filter((p) => p.serverId && memberOfServer(st, username, p.serverId));
@@ -62,8 +68,9 @@ export const scopedUsersFor = (st, username) =>
   Object.values(st.presence)
     .filter((o) => sharesSpace(st, o.username, username))
     .map((o) => ({
-      id: o.id, name: o.name, color: o.color, voiceRoom: o.voiceRoom,
+      id: o.id, name: o.name, color: o.color, username: o.username, voiceRoom: o.voiceRoom,
       servers: serversFor(st, o.username).map((s) => s.id),
+      avatarAt: avatarAtFor(st, o.username),
     }));
 
 export function pushUserLists(st, ctx) {
@@ -101,6 +108,8 @@ export function publicFriend(st, username, onlineSet) {
     username: acc ? acc.username : username,
     color: acc ? acc.color : '#5865f2',
     online: onlineSet.has(LOWER(username)),
+    avatarAt: (acc && acc.avatarAt) || 0,
+    bannerAt: (acc && acc.bannerAt) || 0,
   };
 }
 export function friendsPayloadFor(st, username) {
@@ -111,11 +120,11 @@ export function friendsPayloadFor(st, username) {
     .sort((x, y) => Number(y.online) - Number(x.online) || x.username.localeCompare(y.username));
   const incoming = (st.friendRequests.get(u) || []).map((r) => {
     const acc = st.accounts.get(r.from);
-    return { username: acc ? acc.username : r.from, color: acc ? acc.color : '#5865f2', ts: r.ts };
+    return { username: acc ? acc.username : r.from, color: acc ? acc.color : '#5865f2', ts: r.ts, avatarAt: (acc && acc.avatarAt) || 0 };
   });
   const outgoing = [];
   for (const [to, list] of st.friendRequests) {
-    for (const r of list) if (r.from === u) outgoing.push({ username: to, ts: r.ts });
+    for (const r of list) if (r.from === u) outgoing.push({ username: to, ts: r.ts, avatarAt: avatarAtFor(st, to) });
   }
   return { friends, incoming, outgoing };
 }
@@ -168,8 +177,11 @@ export function dmSummariesFor(st, username) {
     out.push({
       key, with: other,
       name: acc ? acc.username : other,
+      username: acc ? acc.username : other,
       color: acc ? acc.color : '#5865f2',
       online: online.has(other),
+      avatarAt: (acc && acc.avatarAt) || 0,
+      bannerAt: (acc && acc.bannerAt) || 0,
       last: last ? { text: last.text, ts: last.ts, from: LOWER(last.name) === u ? 'me' : other } : null,
     });
   }
@@ -180,5 +192,12 @@ export function emitDmSummaries(st, ctx, pair) {
   emit(ctx, pair[1], 'dms', dmSummariesFor(st, pair[1]));
 }
 export const pushDmsTo = (st, ctx, username) => emit(ctx, username, 'dms', dmSummariesFor(st, username));
+/* notify every present user of their (possibly updated) DM summaries —
+ * used after media changes so avatar columns refresh live */
+export function pushDmsForAllPresent(st, ctx) {
+  for (const username of new Set(Object.values(st.presence).map((u) => LOWER(u.username)))) {
+    emit(ctx, username, 'dms', dmSummariesFor(st, username));
+  }
+}
 
 

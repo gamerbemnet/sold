@@ -7,6 +7,7 @@ import {
   TURN_UPSTREAM, TURN_UPSTREAM_HEADERS, TURN_REFRESH_MS, DEFAULT_CHANNEL_SEED,
   SERVER_COLORS, MAX_SERVERS_PER_USER, randHex, randInt, timingSafeEqualStr,
   normalizeUsername, CORS_HEADERS, jsonRes,
+  MAX_MEDIA_BYTES, sniffImageType, avatarKey, bannerKey, serverBannerKey,
 } from './const.js';
 import { hashPassword, verifyPassword } from './password.js';
 import {
@@ -18,7 +19,7 @@ import {
   friendsPayloadFor, dmAuthorized, dmSummariesFor, scopedUsersFor, scopedVoiceFor,
   setFriendship, addFriendRequest, removeFriendRequest, pushFriendsTo, pushDmsTo,
   pushChannelsToServer, pushChannelsFor, pushUserLists, pushVoiceLists,
-  refreshFriendsPresence, emitToServerMembers, sharesSpace,
+  refreshFriendsPresence, emitToServerMembers, sharesSpace, pushDmsForAllPresent,
 } from './domain.js';
 import { flushEffects, outboxCursor, outboxRead } from './outbox.js';
 import { applyAction, ensurePresence } from './actions.js';
@@ -64,6 +65,61 @@ async function readJson(request) {
   try { return await request.json(); } catch { return null; }
 }
 
+/* ---------- media (avatars / banners) -------------------------------- */
+
+const mediaHeaders = {
+  'Cache-Control': 'public, max-age=31536000, immutable',
+  'X-Content-Type-Options': 'nosniff',
+  ...CORS_HEADERS,
+};
+
+async function serveMedia(env, key) {
+  try {
+    const obj = await env.SOLD_DATA.get(key);
+    if (!obj) return jsonRes({ error: 'not found' }, 404);
+    const bytes = await obj.arrayBuffer();
+    const type = sniffImageType(new Uint8Array(bytes)) || 'application/octet-stream';
+    return new Response(bytes, { headers: { 'Content-Type': type, ...mediaHeaders } });
+  } catch (err) {
+    console.warn('media read failed:', err && err.message);
+    return jsonRes({ error: 'not found' }, 404);
+  }
+}
+
+/* raw-binary image upload: size + magic-byte validation (animated GIF/WebP
+ * pass through untouched, which is what makes them animate in <img>) */
+async function readMediaUpload(request) {
+  const declared = Number(request.headers.get('content-length') || 0);
+  if (declared > MAX_MEDIA_BYTES) {
+    return { error: jsonRes({ error: 'Image too big — 4 MB max.' }, 413) };
+  }
+  let buf;
+  try {
+    buf = await request.arrayBuffer();
+  } catch (_) {
+    return { error: jsonRes({ error: 'Could not read the upload.' }, 400) };
+  }
+  if (buf.byteLength > MAX_MEDIA_BYTES) {
+    return { error: jsonRes({ error: 'Image too big — 4 MB max.' }, 413) };
+  }
+  const type = sniffImageType(new Uint8Array(buf));
+  if (!type) {
+    return { error: jsonRes({ error: 'Only JPEG, PNG, GIF or WebP images.' }, 415) };
+  }
+  return { buf, type };
+}
+
+/* after any media change: tell every present client so avatars/banners
+ * refresh live everywhere (members, friends, DMs) */
+async function pushMediaRefresh(env, st, me) {
+  const actor = { env, effects: [], clientId: null, caller: LOWER(me) };
+  pushUserLists(st, actor);
+  refreshFriendsPresence(st, actor);
+  pushDmsForAllPresent(st, actor);
+  pushVoiceLists(st, actor);
+  try { await flushEffects(env, actor.effects); } catch (err) { console.warn('media push failed:', err && err.message); }
+}
+
 /* TURN credentials, cached in R2 so isolates share one upstream fetch. */
 async function getTurnCredentials(env) {
   const now = Date.now();
@@ -100,6 +156,106 @@ export async function handleRequest(request, env, ctx) {
   if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
 
   try {
+    /* ---------- media: public GET (<img> can't carry auth) ------------- */
+    const mediaGet = /^\/api\/(avatar|banner|server-banner)\/([a-z0-9_.-]{1,48})$/i.exec(path);
+    if (mediaGet && method === 'GET') {
+      const kind = mediaGet[1].toLowerCase();
+      const id = mediaGet[2];
+      const key = kind === 'avatar' ? avatarKey(id) : kind === 'banner' ? bannerKey(id) : serverBannerKey(id);
+      return await serveMedia(env, key);
+    }
+
+    /* ---------- media: uploads (raw binary — before JSON parsing) ------ */
+    if ((path === '/api/account/avatar' || path === '/api/account/banner') &&
+        (method === 'POST' || method === 'DELETE')) {
+      const st = await loadState(env);
+      const account = await sessionAccount(env, st, String(url.searchParams.get('token') || ''));
+      if (!account) return jsonRes({ error: 'Please log in again.' }, 401);
+      const isAvatar = path === '/api/account/avatar';
+      const key = isAvatar ? avatarKey(account.username) : bannerKey(account.username);
+      const stored = st.accounts.get(LOWER(account.username));
+      if (method === 'DELETE') {
+        try { await env.SOLD_DATA.delete(key); } catch (_) { /* already gone */ }
+        if (stored) {
+          if (isAvatar) stored.avatarAt = 0; else stored.bannerAt = 0;
+          st.accounts.set(LOWER(account.username), stored);
+          await saveAccounts(env, st);
+        }
+        await pushMediaRefresh(env, st, account.username);
+        return jsonRes(isAvatar ? { ok: true, avatarAt: 0 } : { ok: true, bannerAt: 0 });
+      }
+      const up = await readMediaUpload(request);
+      if (up.error) return up.error;
+      await env.SOLD_DATA.put(key, up.buf, { httpMetadata: { contentType: up.type } });
+      const stamp = Date.now();
+      if (stored) {
+        if (isAvatar) stored.avatarAt = stamp; else stored.bannerAt = stamp;
+        st.accounts.set(LOWER(account.username), stored);
+        await saveAccounts(env, st);
+      }
+      await pushMediaRefresh(env, st, account.username);
+      return jsonRes(isAvatar ? { ok: true, avatarAt: stamp } : { ok: true, bannerAt: stamp });
+    }
+
+    if (path === '/api/servers/banner' && (method === 'POST' || method === 'DELETE')) {
+      const st = await loadState(env);
+      const account = await sessionAccount(env, st, String(url.searchParams.get('token') || ''));
+      if (!account) return jsonRes({ error: 'Please log in again.' }, 401);
+      const me = LOWER(account.username);
+      const serverId = String(url.searchParams.get('serverId') || '');
+      const srv = st.servers.get(serverId);
+      if (!srv) return jsonRes({ error: 'Server not found.' }, 404);
+      if (srv.owner !== me) return jsonRes({ error: 'Only the server owner can change its banner.' }, 403);
+      const key = serverBannerKey(serverId);
+      const finish = async (bannerAt) => {
+        srv.bannerAt = bannerAt;
+        st.servers.set(serverId, srv);
+        await saveServers(env, st);
+        const actor = { env, effects: [], clientId: null, caller: me };
+        emitToServerMembers(st, actor, serverId, 'server:banner', { serverId, bannerAt });
+        try { await flushEffects(env, actor.effects); } catch (err) { console.warn('banner push failed:', err && err.message); }
+        return jsonRes({ ok: true, bannerAt });
+      };
+      if (method === 'DELETE') {
+        try { await env.SOLD_DATA.delete(key); } catch (_) { /* already gone */ }
+        return await finish(0);
+      }
+      const up = await readMediaUpload(request);
+      if (up.error) return up.error;
+      await env.SOLD_DATA.put(key, up.buf, { httpMetadata: { contentType: up.type } });
+      return await finish(Date.now());
+    }
+
+    /* ---------- profile card -------------------------------------------- */
+    if (path === '/api/profile' && method === 'GET') {
+      const st = await loadState(env);
+      const account = await sessionAccount(env, st, String(url.searchParams.get('token') || ''));
+      if (!account) return jsonRes({ error: 'Please log in again.' }, 401);
+      const me = LOWER(account.username);
+      const target = LOWER(normalizeUsername(String(url.searchParams.get('username') || '')));
+      const acc = st.accounts.get(target);
+      if (!acc) return jsonRes({ error: `No one around here goes by "${target}" yet.` }, 404);
+      const isSelf = target === me;
+      const friend = areFriends(st, me, target);
+      // only self / friends / people sharing a server may see a profile
+      if (!isSelf && !friend && !sharesSpace(st, me, target)) {
+        return jsonRes({ error: 'not allowed' }, 403);
+      }
+      const presenceHits = Object.values(st.presence).filter((p) => LOWER(p.username) === target);
+      const incoming = (st.friendRequests.get(me) || []).some((r) => r.from === target);
+      const outgoing = (st.friendRequests.get(target) || []).some((r) => r.from === me);
+      return jsonRes({
+        username: acc.username,
+        color: acc.color,
+        createdAt: acc.createdAt,
+        avatarAt: acc.avatarAt || 0,
+        bannerAt: acc.bannerAt || 0,
+        online: presenceHits.length > 0,
+        inCall: presenceHits.some((p) => p.voiceRoom),
+        relation: isSelf ? 'self' : friend ? 'friend' : incoming ? 'pending-in' : outgoing ? 'pending-out' : 'none',
+      });
+    }
+
     if (path === '/api/health' && method === 'GET') {
       return jsonRes({ ok: true, service: 'sold-backend' });
     }
@@ -247,6 +403,8 @@ export async function handleRequest(request, env, ctx) {
           name: (presence && presence.name) || account.username,
           color: (presence && presence.color) || account.color,
           username: me,
+          avatarAt: account.avatarAt || 0,
+          bannerAt: account.bannerAt || 0,
         },
         servers: serversFor(st, me).map(publicServer),
         channels: channelsForUser(st, me),

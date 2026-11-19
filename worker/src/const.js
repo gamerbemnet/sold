@@ -45,6 +45,24 @@ export const timingSafeEqualStr = (a, b) => {
 };
 export const newMessageId = () => Date.now() * 1000 + randInt(1000);
 
+/* media (avatars/banners): stored as raw bytes in R2 under media/* */
+export const MAX_MEDIA_BYTES = 4 * 1024 * 1024; // 4 MB per image
+export const avatarKey = (username) => `media/avatar/${LOWER(username)}`;
+export const bannerKey = (username) => `media/banner/${LOWER(username)}`;
+export const serverBannerKey = (serverId) => `media/server-banner/${serverId}`;
+
+/* magic-byte sniff — never trust the client-declared content type */
+export function sniffImageType(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  const b = bytes;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return 'image/gif';
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+      b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  return null;
+}
+
 export const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',

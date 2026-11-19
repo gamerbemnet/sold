@@ -26,6 +26,9 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.3-4.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m21 15-5-5L5 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
@@ -157,6 +160,8 @@
       <header class="sidebar-header">
         <span class="head-left"><span id="sidebar-title">Friends</span></span>
         <div class="sidebar-actions" id="sidebar-actions">
+          <button id="server-banner-btn" class="icon-btn hidden" title="Change server banner"><svg class="icon"><use href="#i-image"/></svg></button>
+          <button id="server-banner-clear" class="icon-btn hidden" title="Remove server banner"><svg class="icon"><use href="#i-trash"/></svg></button>
           <button id="server-invite-btn" class="icon-btn" title="Copy invite link"><svg class="icon"><use href="#i-invite"/></svg></button>
           <button id="leave-server-btn" class="icon-btn" title="Leave server"><svg class="icon"><use href="#i-leave"/></svg></button>
           <button id="add-channel-btn-2" class="icon-btn" title="Create channel"><svg class="icon"><use href="#i-plus"/></svg></button>
@@ -276,6 +281,30 @@
       <div id="member-list" class="member-list"></div>
     </aside>
   </div>
+
+  <!-- Profile card overlay -->
+  <div id="profile-overlay" class="overlay hidden">
+    <div class="profile-card" id="profile-card" role="dialog" aria-label="Profile">
+      <div id="profile-banner" class="profile-banner"></div>
+      <button id="profile-close" class="icon-btn profile-close" title="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+      <div class="profile-body">
+        <div id="profile-avatar" class="profile-avatar">?</div>
+        <div id="profile-name" class="profile-name">…</div>
+        <div id="profile-username" class="profile-username">@</div>
+        <div id="profile-status" class="profile-status">Offline</div>
+        <div id="profile-actions" class="profile-actions"></div>
+        <div id="profile-own" class="profile-own hidden">
+          <button id="own-change-avatar" class="btn-ghost small"><svg class="icon"><use href="#i-camera"/></svg> Change avatar</button>
+          <button id="own-change-banner" class="btn-ghost small"><svg class="icon"><use href="#i-image"/></svg> Change banner</button>
+          <button id="own-remove-media" class="btn-ghost small danger-text"><svg class="icon"><use href="#i-trash"/></svg> Remove media</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+  <input type="file" id="account-banner-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+  <input type="file" id="server-banner-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
 
   <script src="app.js"></script>
 </body>

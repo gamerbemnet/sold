@@ -180,6 +180,62 @@ function toast(text, type) {
 
 const initial = (name) => (name || '?').trim().charAt(0).toUpperCase() || '?';
 
+/* ---------------- media (avatars / banners) ------------------------- */
+const mediaUrl = (kind, id, stamp) =>
+  `${API_BASE}/api/${kind}/${encodeURIComponent(String(id).toLowerCase())}${stamp ? `?v=${stamp}` : ''}`;
+
+/* avatar box: initials underneath, image layered on top (if any) —
+ * a failed <img> removes itself and the initials show through.
+ * When profile=true the outer span carries data-profile so the global
+ * click delegate can open the user's profile card. */
+function avatarHtml(user, cls, inner, profile) {
+  const u = user || {};
+  const name = u.name || u.username || '?';
+  const stamp = u.avatarAt || 0;
+  const has = !!(stamp && u.username);
+  const profileAttr = profile && u.username ? ` data-profile="${escapeHtml(u.username)}"` : '';
+  const img = has
+    ? `<img src="${mediaUrl('avatar', u.username, stamp)}" alt="" draggable="false" onerror="this.remove()" />`
+    : '';
+  return `<span class="${cls}${has ? ' has-img' : ''}${profile ? ' clickable' : ''}"${profileAttr} style="background:${gradientFor(u.color)}">${escapeHtml(initial(name))}${img}${inner || ''}</span>`;
+}
+
+/* swap an existing avatar element (e.g. #me-avatar) in place */
+function setAvatar(el, user) {
+  if (!el) return;
+  const u = user || {};
+  const name = u.name || u.username || '?';
+  const stamp = u.avatarAt || 0;
+  if (stamp && u.username) {
+    el.classList.add('has-img');
+    el.innerHTML = `${escapeHtml(initial(name))}<img src="${mediaUrl('avatar', u.username, stamp)}" alt="" draggable="false" onerror="this.remove()" />`;
+  } else {
+    el.classList.remove('has-img');
+    el.textContent = initial(name);
+  }
+  el.style.background = gradientFor(u.color);
+}
+
+/* gradient fallback used when a banner is not set */
+const BANNER_FALLBACK = 'linear-gradient(115deg, rgba(88,101,242,.75), rgba(240,178,50,.55) 55%, rgba(255,122,89,.55))';
+
+function setBanner(el, kind, id, stamp) {
+  if (!el) return;
+  if (stamp) {
+    el.style.backgroundImage = `linear-gradient(rgba(12,12,14,.28), rgba(12,12,14,.28)), url("${mediaUrl(kind, id, stamp)}")`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.classList.add('has-image');
+  } else {
+    el.style.backgroundImage = BANNER_FALLBACK;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.classList.remove('has-image');
+  }
+}
+
+const userById = (id) => state.users.find((u) => u.id === id) || null;
+
 function fmtTime(ts) {
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -498,8 +554,7 @@ function applyInit(data) {
   renderDmList();
   updateHomeBadge();
   updateViewChrome();
-  $('me-avatar').textContent = initial(data.me.name);
-  $('me-avatar').style.background = gradientFor(data.me.color);
+  setAvatar($('me-avatar'), data.me);
   $('me-name').textContent = data.me.name;
   $('me-status').textContent = 'Online';
   if (state.view === 'home') {
@@ -769,6 +824,25 @@ function updateViewChrome() {
   const srv = activeServer();
   $('sidebar-title').textContent = home ? 'Friends' : (srv ? srv.name : 'Sold');
   $('sidebar-actions').classList.toggle('hidden', home);
+  /* server banner: backdrop for the sidebar header (owner can change/clear) */
+  const isOwner = !!(srv && state.me && srv.owner === String(state.me.username || '').toLowerCase());
+  $('server-banner-btn').classList.toggle('hidden', home || !isOwner);
+  $('server-banner-clear').classList.toggle('hidden', home || !isOwner || !srv || !srv.bannerAt);
+  const header = document.querySelector('.sidebar-header');
+  if (header) {
+    if (!home && srv && srv.bannerAt) {
+      header.classList.add('has-banner');
+      header.style.backgroundImage =
+        `linear-gradient(rgba(18,15,22,.62), rgba(18,15,22,.62)), url("${mediaUrl('server-banner', srv.id, srv.bannerAt)}")`;
+      header.style.backgroundSize = 'cover';
+      header.style.backgroundPosition = 'center';
+    } else {
+      header.classList.remove('has-banner');
+      header.style.backgroundImage = '';
+      header.style.backgroundSize = '';
+      header.style.backgroundPosition = '';
+    }
+  }
   $('channels-scroll').classList.toggle('hidden', home);
   $('home-scroll').classList.toggle('hidden', !home);
   $('friends-panel').classList.toggle('hidden', !(home && state.friendsOpen));
@@ -837,7 +911,7 @@ function renderDmList() {
       : '';
     const badge = missed && !isActive ? `<span class="badge">${missed > 99 ? '99+' : missed}</span>` : '';
     el.innerHTML =
-      `<span class="dm-avatar" style="background:${gradientFor(d.color)}">${escapeHtml(initial(d.name))}${d.online ? '<span class="status-dot"></span>' : ''}</span>` +
+      avatarHtml(d, 'dm-avatar', d.online ? '<span class="status-dot"></span>' : '', true) +
       `<span class="dm-meta"><span class="dm-name">${escapeHtml(d.name)}</span>${preview}</span>` +
       badge;
     el.addEventListener('click', () => openDm(d.key));
@@ -918,7 +992,7 @@ function renderFriends() {
       const el = document.createElement('div');
       el.className = 'friend-row';
       el.innerHTML =
-        `<div class="friend-avatar" style="background:${gradientFor(r.color)}">${escapeHtml(initial(r.username))}</div>` +
+        avatarHtml(r, 'friend-avatar', '', true) +
         `<div class="friend-info"><div class="friend-name">${escapeHtml(r.username)}</div>` +
         `<div class="friend-status">wants to be friends</div></div>` +
         `<div class="friend-actions">` +
@@ -938,7 +1012,7 @@ function renderFriends() {
       const el = document.createElement('div');
       el.className = 'friend-row';
       el.innerHTML =
-        `<div class="friend-avatar" style="background:${gradientFor('#4a4157')}">${escapeHtml(initial(r.username))}</div>` +
+        avatarHtml({ ...r, color: '#4a4157' }, 'friend-avatar', '', true) +
         `<div class="friend-info"><div class="friend-name">${escapeHtml(r.username)}</div>` +
         `<div class="friend-status">request sent — waiting on them</div></div>` +
         `<div class="friend-actions"><button class="friend-cancel-btn" data-action="cancel" data-username="${escapeHtml(r.username)}">Cancel</button></div>`;
@@ -972,7 +1046,7 @@ function renderFriends() {
     const el = document.createElement('div');
     el.className = 'friend-row';
     el.innerHTML =
-      `<div class="friend-avatar" style="background:${gradientFor(f.color)}">${escapeHtml(initial(f.username))}<span class="status-dot${f.online ? ' on' : ''}"></span></div>` +
+      avatarHtml(f, 'friend-avatar', `<span class="status-dot${f.online ? ' on' : ''}"></span>`, true) +
       `<div class="friend-info"><div class="friend-name">${escapeHtml(f.username)}</div>` +
       `<div class="friend-status">${f.online ? 'Online' : 'Offline'}</div></div>` +
       `<div class="friend-actions">` +
@@ -1356,8 +1430,15 @@ function buildMessage(msg, last) {
   const hoverTime = grouped
     ? `<div class="msg-hover-time">${fmtTime(msg.ts)}</div>`
     : '';
-  const avatar = `<div class="msg-avatar" style="background:${gradientFor(msg.color)}">${initial(msg.name)}</div>`;
-  const meta = `<div class="msg-meta"><span class="msg-author">${escapeHtml(msg.name)}</span>` +
+  // messages carry username/avatarAt when sent after media support landed;
+  // for older history fall back to the live member list, else initials
+  const lookup = msg.username ? null : userById(msg.userId);
+  const author = msg.username
+    ? { name: msg.name, color: msg.color, username: msg.username, avatarAt: msg.avatarAt || 0 }
+    : (lookup || { name: msg.name, color: msg.color });
+  const authorProfile = author.username ? ` data-profile="${escapeHtml(author.username)}"` : '';
+  const avatar = avatarHtml(author, 'msg-avatar', '', true);
+  const meta = `<div class="msg-meta"><span class="msg-author${authorProfile ? ' clickable' : ''}"${authorProfile}>${escapeHtml(msg.name)}</span>` +
     `<span class="msg-time">${fmtFull(msg.ts)}</span></div>`;
   const text = `<div class="msg-text">${escapeHtml(msg.text)}</div>`;
 
@@ -1548,9 +1629,8 @@ function renderMembers() {
       (isMe ? ' me' : '');
     el.dataset.id = u.id;
     el.innerHTML =
-      `<div class="member-avatar" style="background:${gradientFor(u.color)}">${initial(u.name)}` +
-      `<span class="status-dot"></span></div>` +
-      `<div class="member-name">${escapeHtml(u.name)}${isMe ? '<span class="you-badge">you</span>' : ''}</div>` +
+      avatarHtml(u, 'member-avatar', '<span class="status-dot"></span>', true) +
+      `<div class="member-name${u.username ? ' clickable' : ''}"${u.username ? ` data-profile="${escapeHtml(u.username)}"` : ''}>${escapeHtml(u.name)}${isMe ? '<span class="you-badge">you</span>' : ''}</div>` +
       (inVoice.has(u.id) ? `<div class="member-voice-tag"><span class="voice-dot"></span> Voice</div>` : '');
     list.appendChild(el);
   }
@@ -1817,7 +1897,7 @@ function createPeer(peerId, meta, initiator) {
   };
 
   pc.ontrack = (e) => {
-    const tile = ensureTile(peerId, p.name, p.color);
+    const tile = ensureTile(peerId, p.name, p.color, p);
     const video = tile.querySelector('video');
     video.srcObject = e.streams[0];
     video.muted = voice.deafened;
@@ -1840,7 +1920,7 @@ function createPeer(peerId, meta, initiator) {
     }
   };
 
-  ensureTile(peerId, p.name, p.color);
+  ensureTile(peerId, p.name, p.color, p);
   // The joiner always starts the handshake (also covers listen-only peers
   // that have no local tracks and would otherwise never fire negotiationneeded).
   if (initiator) negotiate(p, peerId);
@@ -2072,10 +2152,12 @@ function updateConnLabel() {
 
 /* ---------------- tiles ---------------- */
 
-function ensureTile(id, name, color) {
+function ensureTile(id, name, color, user) {
   let tile = document.querySelector(`.tile[data-id="${CSS.escape(id)}"]`);
   if (tile) {
     tile.dataset.name = name;
+    const fb = tile.querySelector('.tile-fallback');
+    if (fb) fb.innerHTML = avatarHtml(user || { name, color }, 'tf-avatar');
     return tile;
   }
   tile = document.createElement('div');
@@ -2084,7 +2166,7 @@ function ensureTile(id, name, color) {
   tile.dataset.name = name;
   tile.innerHTML =
     `<video autoplay playsinline style="opacity:0"></video>` +
-    `<div class="tile-fallback"><div class="tf-avatar" style="background:${gradientFor(color)}">${initial(name)}</div></div>` +
+    `<div class="tile-fallback">${avatarHtml(user || { name, color }, 'tf-avatar')}</div>` +
     `<div class="tile-name">${escapeHtml(name)}</div>` +
     `<div class="tile-badge" style="display:none">connecting…</div>`;
   $('video-grid').appendChild(tile);
@@ -2100,8 +2182,7 @@ function renderLocalTile() {
   tile.dataset.name = state.me ? state.me.name : 'You';
   tile.innerHTML =
     `<video autoplay playsinline muted class="mirrored" style="opacity:0"></video>` +
-    `<div class="tile-fallback"><div class="tf-avatar" style="background:${gradientFor(state.me ? state.me.color : '#5865f2')}">` +
-    `${initial(state.me && state.me.name)}</div></div>` +
+    `<div class="tile-fallback">${avatarHtml(state.me || { name: 'You', color: '#5865f2' }, 'tf-avatar')}</div>` +
     `<div class="tile-name">You</div>`;
   $('video-grid').appendChild(tile);
   if (voice.localStream) {
@@ -2152,9 +2233,314 @@ function updateTilesFromState() {
   if (voice.channel) {
     state.participants
       .filter((p) => p.channel === voice.channel && p.id !== socket.id)
-      .forEach((p) => ensureTile(p.id, p.name, p.color));
+      .forEach((p) => ensureTile(p.id, p.name, p.color, p));
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Avatar / banner uploads + profile card                               */
+/* ------------------------------------------------------------------ */
+
+let profileName = null;   // username currently shown in the profile card
+let profileData = null;   // last fetched profile payload
+
+const readFileAsDataURL = (file) =>
+  new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error('Could not read that file.'));
+    r.readAsDataURL(file);
+  });
+const loadImage = (src) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('That does not look like an image.'));
+    img.src = src;
+  });
+
+/* animated GIF/WebP keep their frames (sent raw, capped by the server at
+ * 4 MB); everything else gets downscaled and re-encoded as WebP */
+async function prepareUpload(file, maxDim) {
+  const type = String(file.type || '').toLowerCase();
+  if (type === 'image/gif' || type === 'image/webp') {
+    if (file.size > 4 * 1024 * 1024) {
+      throw new Error('Animated images must be under 4 MB to keep the animation.');
+    }
+    return { blob: file, type };
+  }
+  const img = await loadImage(await readFileAsDataURL(file));
+  const w = img.naturalWidth || 1;
+  const h = img.naturalHeight || 1;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  if (scale >= 0.999 && file.size <= 1536 * 1024) {
+    return { blob: file, type: type || 'image/png' };
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((res) => canvas.toBlob(res, 'image/webp', 0.92));
+  return blob ? { blob, type: 'image/webp' } : { blob: file, type: type || 'image/png' };
+}
+
+const MEDIA_TARGETS = {
+  avatar: { maxDim: 512, stampField: 'avatarAt',
+    url: () => `${API_BASE}/api/account/avatar?token=${encodeURIComponent(currentToken())}` },
+  'account-banner': { maxDim: 1600, stampField: 'bannerAt',
+    url: () => `${API_BASE}/api/account/banner?token=${encodeURIComponent(currentToken())}` },
+  'server-banner': { maxDim: 1600, stampField: 'bannerAt',
+    url: () => `${API_BASE}/api/servers/banner?token=${encodeURIComponent(currentToken())}&serverId=${encodeURIComponent(state.activeServerId || '')}` },
+};
+
+async function sendMedia(kind, file) {
+  const cfg = MEDIA_TARGETS[kind];
+  if (!cfg) return;
+  let prepared;
+  try {
+    prepared = await prepareUpload(file, cfg.maxDim);
+  } catch (err) {
+    toast((err && err.message) || 'That image could not be used.', 'error');
+    return;
+  }
+  let res;
+  try {
+    res = await fetch(cfg.url(), {
+      method: 'POST',
+      headers: { 'Content-Type': prepared.type },
+      body: prepared.blob,
+    });
+  } catch (_) {
+    toast('Upload failed — check your connection.', 'error');
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    toast((data && data.error) || 'Upload failed.', 'error');
+    return;
+  }
+  applyMediaStamp(kind, data[cfg.stampField] || Date.now());
+  toast('Saved!', 'success');
+}
+
+function applyMediaStamp(kind, stamp) {
+  if (kind === 'avatar' && state.me) state.me.avatarAt = stamp;
+  else if (kind === 'account-banner' && state.me) state.me.bannerAt = stamp;
+  else if (kind === 'server-banner') {
+    const srv = state.servers.find((s) => s.id === state.activeServerId);
+    if (srv) srv.bannerAt = stamp;
+  }
+  renderMedia();
+  if (profileName && !$('profile-overlay').classList.contains('hidden')) openProfile(profileName);
+}
+
+async function deleteMedia(kind) {
+  const url = MEDIA_TARGETS[kind].url();
+  try { await fetch(url, { method: 'DELETE' }); } catch (_) { /* best effort */ }
+  applyMediaStamp(kind, 0);
+}
+
+/* fresh lookup of every username we know → avatarAt stamp */
+function buildMediaMap() {
+  const m = new Map();
+  const push = (u) => { if (u && u.username) m.set(String(u.username).toLowerCase(), u.avatarAt || 0); };
+  (state.users || []).forEach(push);
+  (state.friends || []).forEach(push);
+  (state.dms || []).forEach(push);
+  push(state.me);
+  return m;
+}
+
+/* re-render every media surface in place after an avatar/banner change */
+function renderMedia() {
+  setAvatar($('me-avatar'), state.me);
+  renderDmList();
+  renderFriends();
+  renderMembers();
+  updateTilesFromState();
+  updateViewChrome();
+  // revive <img> stamps on already-rendered messages (old ones stay cached)
+  const stamps = buildMediaMap();
+  document.querySelectorAll('.msg-avatar[data-profile]').forEach((el) => {
+    const uname = el.getAttribute('data-profile');
+    const stamp = stamps.get(String(uname).toLowerCase()) || 0;
+    const img = el.querySelector('img');
+    if (stamp) {
+      if (img) img.src = mediaUrl('avatar', uname, stamp);
+      else el.outerHTML = avatarHtml({ name: uname, color: '#5865f2', username: uname, avatarAt: stamp }, 'msg-avatar', '', true);
+    } else if (img) {
+      img.remove();
+    }
+  });
+}
+
+/* ---------------- profile card ---------------- */
+
+function closeProfile() {
+  $('profile-overlay').classList.add('hidden');
+  profileName = null;
+  profileData = null;
+}
+
+async function openProfile(username) {
+  profileName = username;
+  profileData = null;
+  const overlay = $('profile-overlay');
+  setBanner($('profile-banner'), 'banner', username, 0);
+  setAvatar($('profile-avatar'), { name: username, color: '#5865f2' });
+  $('profile-name').textContent = username;
+  $('profile-username').textContent = '@' + username;
+  $('profile-status').textContent = 'Loading…';
+  $('profile-actions').innerHTML = '';
+  $('profile-own').classList.add('hidden');
+  overlay.classList.remove('hidden');
+  let p;
+  try {
+    const res = await fetch(`${API_BASE}/api/profile?token=${encodeURIComponent(currentToken())}&username=${encodeURIComponent(username)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast((data && data.error) || 'Could not load that profile.', 'error');
+      closeProfile();
+      return;
+    }
+    p = data;
+  } catch (_) {
+    toast('Network error — try again.', 'error');
+    closeProfile();
+    return;
+  }
+  if (profileName !== username) return; // another profile was opened meanwhile
+  renderProfile(p);
+}
+
+function renderProfile(p) {
+  profileData = p;
+  setBanner($('profile-banner'), 'banner', p.username, p.bannerAt);
+  setAvatar($('profile-avatar'), { name: p.username, color: p.color, username: p.username, avatarAt: p.avatarAt });
+  $('profile-name').textContent = p.username;
+  $('profile-username').textContent = '@' + p.username;
+  $('profile-status').textContent =
+    p.relation === 'self' ? 'This is you'
+    : p.inCall ? 'In a voice call'
+    : p.online ? 'Online'
+    : 'Offline';
+  const actions = $('profile-actions');
+  actions.innerHTML = '';
+  $('profile-own').classList.toggle('hidden', p.relation !== 'self');
+  if (p.relation === 'friend') {
+    actions.innerHTML =
+      '<button type="button" class="btn-primary small" data-pact="message">Message</button>' +
+      '<button type="button" class="btn-ghost small danger-text" data-pact="remove">Remove friend</button>';
+  } else if (p.relation === 'pending-in') {
+    actions.innerHTML =
+      '<button type="button" class="btn-primary small" data-pact="accept">Accept</button>' +
+      '<button type="button" class="btn-ghost small" data-pact="decline">Decline</button>';
+  } else if (p.relation === 'pending-out') {
+    actions.innerHTML = '<button type="button" class="btn-ghost small" disabled>Request sent</button>';
+  } else if (p.relation === 'none') {
+    actions.innerHTML = '<button type="button" class="btn-primary small" data-pact="add">Add friend</button>';
+  }
+}
+
+/* ---------------- profile card interactions ---------------- */
+
+$('profile-close').addEventListener('click', closeProfile);
+$('profile-overlay').addEventListener('click', (e) => {
+  if (e.target === $('profile-overlay')) closeProfile();
+});
+
+$('profile-actions').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-pact]');
+  if (!b || b.disabled || !profileData) return;
+  const act = b.dataset.pact;
+  const username = profileData.username;
+  const token = currentToken();
+  const respond = async (url, body) => {
+    b.disabled = true;
+    const res = await postJson(url, { token, ...body });
+    if (!res.ok) {
+      b.disabled = false;
+      toast((res.data && res.data.error) || 'Something went wrong.', 'error');
+      return;
+    }
+    if (res.data && res.data.friends) applyFriendsPayload(res.data.friends);
+    openProfile(username); // refetch → fresh relation state
+  };
+  if (act === 'message') {
+    closeProfile();
+    openDm(dmKeyFor((state.me && state.me.username) || '', username));
+    return;
+  }
+  if (act === 'add') return respond('/api/friends/request', { username });
+  if (act === 'accept') return respond('/api/friends/respond', { username, accept: true });
+  if (act === 'decline') return respond('/api/friends/respond', { username, accept: false });
+  if (act === 'remove') {
+    if (!window.confirm(`Remove ${username} from your friends?`)) return;
+    return respond('/api/friends/remove', { username });
+  }
+});
+
+$('own-change-avatar').addEventListener('click', () => $('avatar-file').click());
+$('own-change-banner').addEventListener('click', () => $('account-banner-file').click());
+$('own-remove-media').addEventListener('click', async () => {
+  await deleteMedia('avatar');
+  await deleteMedia('account-banner');
+  toast('Media removed.', 'success');
+});
+
+$('avatar-file').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) sendMedia('avatar', f);
+});
+$('account-banner-file').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) sendMedia('account-banner', f);
+});
+$('server-banner-file').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) sendMedia('server-banner', f);
+});
+
+$('server-banner-btn').addEventListener('click', () => $('server-banner-file').click());
+$('server-banner-clear').addEventListener('click', async () => {
+  const token = currentToken();
+  try {
+    await fetch(
+      `${API_BASE}/api/servers/banner?token=${encodeURIComponent(token)}&serverId=${encodeURIComponent(state.activeServerId || '')}`,
+      { method: 'DELETE' }
+    );
+  } catch (_) { /* best effort */ }
+  const srv = state.servers.find((s) => s.id === state.activeServerId);
+  if (srv) srv.bannerAt = 0;
+  updateViewChrome();
+  toast('Server banner cleared.', 'success');
+});
+
+/* click-open: any [data-profile] element opens that user's profile card.
+ * Capture phase so it wins over the DM button's own click handler. */
+document.addEventListener('click', (e) => {
+  const t = e.target && e.target.closest ? e.target.closest('[data-profile]') : null;
+  if (!t) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const uname = t.getAttribute('data-profile');
+  if (uname) openProfile(uname);
+}, true);
+
+/* own avatar in the footer opens your profile card */
+$('me-avatar').addEventListener('click', () => {
+  if (state.me && state.me.username) openProfile(state.me.username);
+});
+
+/* server banners pushed by other members */
+socket.on('server:banner', ({ serverId, bannerAt } = {}) => {
+  const srv = state.servers.find((s) => s.id === serverId);
+  if (srv) srv.bannerAt = bannerAt || 0;
+  updateViewChrome();
+});
 
 /* ------------------------------------------------------------------ */
 /* Boot                                                                */
@@ -2167,6 +2553,7 @@ document.addEventListener('keydown', (e) => {
     closeAddServer();
     closeInvite();
     $('password-overlay').classList.add('hidden');
+    $('profile-overlay').classList.add('hidden');
     emojiPicker.classList.add('hidden');
   }
 });

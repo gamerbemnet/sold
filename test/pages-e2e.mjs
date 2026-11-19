@@ -311,6 +311,48 @@ async function main() {
   const hb = await a.action(li.data.token, 'heartbeat', {});
   check('heartbeat action accepted', hb.status === 200, `status=${hb.status}`);
 
+  /* ------------- media: avatars, banners, profile card ------------- */
+  // 1x1 transparent PNG
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
+  const mediaPost = (route, buf, type) => rawRequest(`${API}${route}`, {
+    method: 'POST',
+    headers: type ? { 'Content-Type': type } : {},
+    body: buf,
+  });
+
+  const avUp = await mediaPost(`/api/account/avatar?token=${encodeURIComponent(li.data.token)}`, png, 'image/png');
+  let avStamp = 0;
+  try { avStamp = (JSON.parse(avUp.body) || {}).avatarAt || 0; } catch (_) {}
+  check('avatar upload round-trips', avUp.status === 200 && avStamp > 0, `status=${avUp.status}`);
+
+  const avGet = await rawRequest(`${API}/api/avatar/${aliceName}?v=${avStamp}`);
+  check('avatar served as image/png', avGet.status === 200 && String(avGet.headers['content-type'] || '').includes('image/png') && avGet.body.length > 0,
+    `status=${avGet.status} type=${avGet.headers['content-type']}`);
+
+  const sbUp = await mediaPost(`/api/servers/banner?token=${encodeURIComponent(li.data.token)}&serverId=${encodeURIComponent(create.data.server?.id)}`, png, 'image/png');
+  let sbStamp = 0;
+  try { sbStamp = (JSON.parse(sbUp.body) || {}).bannerAt || 0; } catch (_) {}
+  check('server banner upload (owner)', sbUp.status === 200 && sbStamp > 0, `status=${sbUp.status}`);
+
+  const sbEvil = await mediaPost(`/api/servers/banner?token=${encodeURIComponent(suBob.data.token)}&serverId=${encodeURIComponent(create.data.server?.id)}`, png, 'image/png');
+  check('server banner upload rejected for non-owner', sbEvil.status === 403, `status=${sbEvil.status}`);
+
+  const sbGet = await rawRequest(`${API}/api/server-banner/${create.data.server?.id}?v=${sbStamp}`);
+  check('server banner served', sbGet.status === 200 && String(sbGet.headers['content-type'] || '').includes('image/png'), `status=${sbGet.status}`);
+
+  const profRes = await rawRequest(`${API}/api/profile?token=${encodeURIComponent(suBob.data.token)}&username=${aliceName}`);
+  let prof = null;
+  try { prof = JSON.parse(profRes.body); } catch (_) {}
+  check('profile card (friend view) carries media + relation',
+    profRes.status === 200 && prof && prof.relation === 'friend' && prof.avatarAt > 0,
+    `relation=${prof?.relation} avatarAt=${prof?.avatarAt}`);
+
+  const avDel = await rawRequest(`${API}/api/account/avatar?token=${encodeURIComponent(li.data.token)}`, { method: 'DELETE' });
+  const sbDel = await rawRequest(`${API}/api/servers/banner?token=${encodeURIComponent(li.data.token)}&serverId=${encodeURIComponent(create.data.server?.id)}`, { method: 'DELETE' });
+  const avGone = await rawRequest(`${API}/api/avatar/${aliceName}`);
+  check('avatar + server banner deleted', avDel.status === 200 && sbDel.status === 200 && avGone.status === 404,
+    `${avDel.status}/${sbDel.status}/${avGone.status}`);
+
   a.close();
   b.close();
   // let the worker notice the disconnects and clear presence

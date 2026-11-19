@@ -64,6 +64,24 @@ else can see nothing.
   (Cloudflare's global TURN network) so calls work between peers on different
   networks, NATs and countries
 
+**Profile pictures & banners**
+- Custom profile pictures — square, shown in the member list, friends, DMs,
+  messages and voice tiles (static and **animated**: GIF/WebP keep their frames)
+- Account banner: shown on your profile card (and friends can see it)
+- Server banner: owners set one per server — shown as the backdrop of the
+  channel sidebar (live for every member)
+- Click any avatar / username to open the **profile card**: banner, avatar,
+  status (online / in a call), and context actions — Message / Remove friend,
+  Accept / Decline requests, Add friend for strangers
+- Media lives in R2 (`media/avatar/*`, `media/banner/*`, `media/server-banner/*`)
+  and is served publicly with immutable caching — Discord-CDN style (`<img>`
+  can't send auth headers). Uploads are magic-byte validated (JPEG/PNG/GIF/WebP),
+  ≤ 4 MB; oversized static images are downscaled client-side and re-encoded as
+  WebP (512px avatars, 1600px banners)
+- Visibility: profile cards only open for yourself, friends, and members of a
+  shared server; media URLs are public-by-link (same tradeoff as Discord)
+- APNG is flattened to its first frame (upload the animated version as WebP/GIF)
+
 ## Run locally
 
 ```bash
@@ -83,6 +101,12 @@ POST /api/signup  {username, password}  -> {token, user}
 POST /api/login   {username, password}  -> {token, user}
 POST /api/logout  {token}               -> {ok}
 POST /api/account/password {token, currentPassword, newPassword} -> {ok}
+GET  /api/profile?token=…&username=…    -> {username, color, avatarAt, bannerAt, online, inCall, relation}
+GET  /api/avatar|banner|server-banner/<id>[?v=stamp]  (public, immutable cache)
+POST /api/account/avatar|banner?token=…   (raw binary image, ≤ 4 MB)
+DELETE /api/account/avatar|banner?token=…
+POST /api/servers/banner?token=…&serverId=…   (server owner only)
+DELETE /api/servers/banner?token=…&serverId=…
 ```
 
 Usernames: 3–24 chars (`letters, numbers, _ . -`). Passwords: 6–100 chars.
@@ -173,16 +197,18 @@ SDP & ICE relay, voice state broadcast, cross-server isolation probes (an
 outsider account cannot open history, post, or join voice), leave/rejoin,
 and disconnect handling.
 
-`test/pages-e2e.mjs` (31 checks) exercises the live deployment over HTTP
+`test/pages-e2e.mjs` (38 checks) exercises the live deployment over HTTP
 and SSE: static serving, `/api/health`, CORS preflight, TURN credentials,
 signup/login (incl. wrong password), server creation + invite join, SSE
 transport (hello + bad-token rejection), bootstrap, message/typing/reaction
 relay over SSE, voice join/peer discovery, SDP/ICE signaling relay, the
 password endpoint (wrong current password rejected — no mutation), friend
 request → accept (delivered live over SSE), DMs over SSE + `/api/history`,
-and heartbeat. Note: it creates throwaway accounts (`alice-…`/`bob-…`) on
-the live instance — prune them afterwards via `/api/admin/export` +
-`/api/admin/import` if the instance is single-tenant.
+heartbeat, and the media flow (avatar upload + public serve as image/png,
+server-banner upload owner-only + non-owner 403, profile card friend view
+carrying media stamps, and delete round-trips). Note: it creates throwaway
+accounts (`alice-…`/`bob-…`) on the live instance — prune them afterwards via
+`/api/admin/export` + `/api/admin/import` if the instance is single-tenant.
 
 TURN diagnostics (require network access):
 
@@ -198,16 +224,17 @@ server.js              Express + Socket.IO dev/test backend (accounts, channels,
 worker/src/            Live backend: stateless Cloudflare Worker, R2-backed
                        (const/state/password/domain/outbox/actions/sold/index)
 worker/src/password.js WebCrypto PBKDF2 hashing (Free-plan-safe; scrypt blew the CPU limit)
-public/index.html      UI structure (auth screen, server rail, sidebar, chat, voice panel, members)
+public/index.html      UI structure (auth screen, server rail, sidebar, chat, voice panel, members, profile card)
 public/style.css       Discord-like dark theme
 public/app.js          Client: auth flow, chat rendering, WebRTC peers, media controls, ICE refresh;
+                       profile card + media uploads (canvas downscale);
                        talks to the Worker over SSE + fetch (API_BASE constant)
 scripts/deploy-pages.mjs   Deploy the static UI to Cloudflare Pages
 scripts/deploy-worker.mjs  Deploy the backend Worker (R2 binding) via the Cloudflare API
 data/accounts.json     Local dev credentials + session tokens (created on first signup)
 data/servers.json      Local dev servers, members, invites and channels
 test/protocol-test.mjs End-to-end protocol test for the local backend (52 checks)
-test/pages-e2e.mjs     Live end-to-end test: Pages (static) + Worker (SSE/POST), 31 checks
+test/pages-e2e.mjs     Live end-to-end test: Pages (static) + Worker (SSE/POST), 38 checks
 test/turn-cloudflare.cjs  Verifies Cloudflare TURN allocation end-to-end
 ```
 
