@@ -6,7 +6,84 @@ const $ = (id) => document.getElementById(id);
 const icon = (id, cls) =>
   `<svg class="icon${cls ? ' ' + cls : ''}"><use href="#i-${id}"/></svg>`;
 
-const socket = io();
+/* ---------------- transport: SSE in, HTTP POSTs out ----------------
+ * The backend is a stateless Cloudflare Worker (no socket.io). Clients open
+ * an EventSource (/api/events) that streams { n, b } events from their own
+ * outbox; client -> server messages go to POST /api/action. The adapter
+ * exposes a socket.io-like surface (.id, .connected, .on, .emit, .connect,
+ * .disconnect) so the rest of the app is unchanged. */
+const API_BASE = 'https://sold-backend.soldforums.workers.dev';
+const CLIENT_ID = crypto.randomUUID();
+
+class SSEAdapter {
+  constructor() {
+    this.id = CLIENT_ID;
+    this.connected = false;
+    this.handlers = new Map();
+    this.es = null;
+    this.lastSeq = 0;
+    this.reconnectTimer = null;
+    this.connect();
+  }
+  on(name, cb) {
+    if (!this.handlers.has(name)) this.handlers.set(name, []);
+    this.handlers.get(name).push(cb);
+  }
+  emit(name, body) {
+    const token = currentToken();
+    if (!token) return;
+    fetch(`${API_BASE}/api/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, clientId: this.id, n: name, b: body }),
+    }).catch(() => {});
+  }
+  connect() {
+    if (this.es) return;
+    const token = currentToken();
+    if (!token) return; // after auth, joinWithToken() opens the stream
+    const since = this.lastSeq > 0 ? this.lastSeq + 1 : -1;
+    const es = new EventSource(
+      `${API_BASE}/api/events?token=${encodeURIComponent(token)}&clientId=${this.id}&since=${since}`
+    );
+    this.es = es;
+    es.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (_) { return; }
+      if (ev.lastEventId) {
+        const seq = Number(ev.lastEventId);
+        if (Number.isFinite(seq) && seq > this.lastSeq) this.lastSeq = seq;
+      }
+      if (msg && msg.n === 'hello') {
+        const was = this.connected;
+        this.connected = true;
+        if (!was) this.#dispatch('connect', {});
+        return;
+      }
+      if (msg && msg.n) this.#dispatch(msg.n, msg.b);
+    };
+    es.onerror = () => {
+      if (!this.es) return;
+      try { this.es.close(); } catch (_) {}
+      this.es = null;
+      this.connected = false;
+      this.#dispatch('disconnect', {});
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = setTimeout(() => this.connect(), 1500);
+    };
+  }
+  #dispatch(name, body) {
+    for (const cb of this.handlers.get(name) || []) {
+      try { cb(body); } catch (err) { console.warn('handler error (' + name + '):', err); }
+    }
+  }
+  disconnect() {
+    clearTimeout(this.reconnectTimer);
+    if (this.es) { try { this.es.close(); } catch (_) {} this.es = null; }
+    this.connected = false;
+  }
+}
+const socket = new SSEAdapter();
 
 const state = {
   me: null,                 // {id, name, color, username}
@@ -62,7 +139,7 @@ let RTC_CONFIG = { iceServers: [...BASE_STUN], iceCandidatePoolSize: 10 };
 
 async function refreshIceConfig() {
   try {
-    const res = await fetch('/api/turn', { cache: 'no-store' });
+    const res = await fetch(API_BASE + '/api/turn', { cache: 'no-store' });
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
     const stun = (data.urls || []).filter((u) => u.startsWith('stun:'));
@@ -243,7 +320,7 @@ async function submitAuth() {
   btn.textContent = 'Working…';
 
   try {
-    const res = await fetch(`/api/${authMode === 'login' ? 'login' : 'signup'}`, {
+    const res = await fetch(`${API_BASE}/api/${authMode === 'login' ? 'login' : 'signup'}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -268,9 +345,36 @@ async function submitAuth() {
   }
 }
 
-function joinWithToken(token) {
-  if (socket.connected) socket.emit('join', { token });
-  else socket.connect(); // 'connect' handler will join with the stored token
+function joinWithToken(/* token */) {
+  socket.connect(); // hello -> 'connect' handler -> refreshBootstrap()
+  if (socket.connected) refreshBootstrap();
+}
+
+/* Pull a full state snapshot from the Worker and render it. Called on
+ * every (re)connect and after REST calls that change servers/membership. */
+async function refreshBootstrap() {
+  const token = currentToken();
+  if (!token) { showLogin(); return; }
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/bootstrap?token=${encodeURIComponent(token)}&clientId=${CLIENT_ID}`,
+      { cache: 'no-store' }
+    );
+    if (res.status === 401) { handleSessionExpired('Your session expired — please sign in again.'); return; }
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+    applyInit(data);
+    if (data.friends) applyFriends(data.friends);
+  } catch (err) {
+    console.warn('bootstrap failed:', err.message);
+    $('me-status').textContent = 'Reconnecting…';
+  }
+}
+
+function handleSessionExpired(message) {
+  try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+  state.me = null;
+  showLogin(message || 'Your session expired — please sign in again.');
 }
 
 function currentToken() {
@@ -293,11 +397,46 @@ $('auth-password').addEventListener('keydown', (e) => {
 });
 $('auth-password2').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); });
 
+$('panel-password').addEventListener('click', () => {
+  $('pw-current').value = '';
+  $('pw-new').value = '';
+  $('pw-new2').value = '';
+  $('pw-error').classList.add('hidden');
+  $('password-overlay').classList.remove('hidden');
+  $('pw-current').focus();
+});
+$('pw-cancel').addEventListener('click', () => $('password-overlay').classList.add('hidden'));
+$('password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('pw-error');
+  const showErr = (msg) => { err.textContent = msg; err.classList.remove('hidden'); };
+  const token = currentToken();
+  if (!token) return showErr('Not signed in.');
+  const current = $('pw-current').value;
+  const next = $('pw-new').value;
+  if (next.length < 6) return showErr('Passwords need at least 6 characters.');
+  if (next !== $('pw-new2').value) return showErr("New passwords don't match.");
+  try {
+    const res = await fetch(`${API_BASE}/api/account/password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, currentPassword: current, newPassword: next }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) return handleSessionExpired(data.error || 'Your session expired — please sign in again.');
+    if (!res.ok) return showErr(data.error || 'Could not change the password.');
+    $('password-overlay').classList.add('hidden');
+    toast('Password updated — other sessions were signed out.', 'success');
+  } catch (_) {
+    showErr('Network error — try again.');
+  }
+});
+
 $('panel-logout').addEventListener('click', async () => {
   const token = currentToken();
   if (token) {
     try {
-      await fetch('/api/logout', {
+      await fetch(API_BASE + '/api/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
@@ -318,20 +457,12 @@ $('panel-logout').addEventListener('click', async () => {
 /* ------------------------------------------------------------------ */
 
 socket.on('connect', () => {
-  const token = currentToken();
-  if (token) {
-    socket.emit('join', { token });
-  } else {
-    showLogin();
-  }
+  refreshBootstrap();
   $('me-status').textContent = state.me ? 'Online' : 'Connecting…';
 });
 
 socket.on('join:error', ({ error } = {}) => {
-  // token missing/expired/revoked — send the user back to the auth screen
-  try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
-  state.me = null;
-  showLogin(error || 'Your session expired — please sign in again.');
+  handleSessionExpired(error);
 });
 
 socket.on('disconnect', () => {
@@ -339,7 +470,7 @@ socket.on('disconnect', () => {
   if (voice.channel) leaveVoice(true);
 });
 
-socket.on('init', (data) => {
+function applyInit(data) {
   state.me = data.me;
   state.servers = data.servers || [];
   state.channels = data.channels || [];
@@ -400,13 +531,15 @@ socket.on('init', (data) => {
         if (res.ok) {
           toast(`Joined “${res.data.server.name}”`, 'success');
           goToServer(res.data.server.id);
+          refreshBootstrap();
         } else {
           toast(res.data.error || 'Invite not found.', 'error');
         }
       });
     }
   }
-});
+}
+socket.on('init', applyInit);
 
 socket.on('channels', (channels) => {
   state.channels = channels;
@@ -416,7 +549,7 @@ socket.on('channels', (channels) => {
 
 socket.on('users', (users) => { state.users = users; renderMembers(); });
 
-socket.on('friends', (data) => {
+function applyFriends(data) {
   const incoming = (data && data.incoming) || [];
   if (prevIncomingSnapshot !== null) {
     for (const r of incoming) {
@@ -431,7 +564,8 @@ socket.on('friends', (data) => {
   state.outgoing = (data && data.outgoing) || [];
   renderFriends();
   renderDmList();
-});
+}
+socket.on('friends', applyFriends);
 
 socket.on('dms', (list) => {
   state.dms = Array.isArray(list) ? list : [];
@@ -450,7 +584,19 @@ socket.on('text:history', ({ channelId, messages }) => {
   renderHistory(messages);
 });
 
+const MAX_SEEN_MSG_IDS = 500;
+const seenMessageIds = new Set();
+function markMessageSeen(id) {
+  seenMessageIds.add(id);
+  if (seenMessageIds.size > MAX_SEEN_MSG_IDS) {
+    // drop the oldest ~100 (Set preserves insertion order)
+    let i = 0;
+    for (const v of seenMessageIds) { seenMessageIds.delete(v); if (++i >= 100) break; }
+  }
+}
 socket.on('text:message', (msg) => {
+  if (msg && msg.id != null && seenMessageIds.has(msg.id)) return;
+  if (msg && msg.id != null) markMessageSeen(msg.id);
   if (msg.channelId === state.activeText) {
     appendMessage(msg);
   } else if (msg.userId !== socket.id) {
@@ -496,7 +642,8 @@ socket.on('voice:peers', ({ channel, peers }) => {
   updateConnLabel();
 });
 
-socket.on('voice:signal', ({ from, data }) => {
+socket.on('voice:signal', ({ from, to, data } = {}) => {
+  if (to && to !== CLIENT_ID) return; // addressed to my other tab, not me
   if (!voice.channel) return;
   handleSignal(from, data);
 });
@@ -546,7 +693,7 @@ const initials = (name) => {
 
 async function postJson(url, body) {
   try {
-    const r = await fetch(url, {
+    const r = await fetch(API_BASE + url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -666,7 +813,7 @@ function openDm(key) {
   $('message-input').placeholder = `Message @${other}`;
   $('messages').innerHTML = '';
   clearFilter();
-  socket.emit('text:open', { channelId: key });
+  loadHistory(key);
 }
 
 function renderDmList() {
@@ -932,6 +1079,7 @@ $('add-server-create-form').addEventListener('submit', async (e) => {
   closeAddServer();
   toast(`Created “${res.data.server.name}”`, 'success');
   goToServer(res.data.server.id);
+  refreshBootstrap();
 });
 
 $('add-server-join-form').addEventListener('submit', async (e) => {
@@ -945,6 +1093,7 @@ $('add-server-join-form').addEventListener('submit', async (e) => {
   closeAddServer();
   toast(`Welcome to “${res.data.server.name}”`, 'success');
   goToServer(res.data.server.id);
+  refreshBootstrap();
 });
 
 /* -------- invite modal -------- */
@@ -995,6 +1144,7 @@ $('leave-server-btn').addEventListener('click', async () => {
   state.friendsOpen = true;
   state.activeText = null;
   openFriendsPage();
+  refreshBootstrap();
 });
 
 /* ------------------------------------------------------------------ */
@@ -1082,7 +1232,7 @@ function openChannel(id) {
   $('message-input').placeholder = `Message #${ch.name}`;
   $('messages').innerHTML = '';
   clearFilter();
-  socket.emit('text:open', { channelId: id });
+  loadHistory(id);
 }
 
 let lastDayShown = null;
@@ -1095,6 +1245,22 @@ function ensureDayDivider(wrap, ts) {
   div.className = 'day-divider';
   div.textContent = fmtDay(ts);
   wrap.appendChild(div);
+}
+
+/* Fetch a channel/DM's messages on demand and render them. */
+async function loadHistory(channelId) {
+  const token = currentToken();
+  if (!token) return;
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/history?token=${encodeURIComponent(token)}&channelId=${encodeURIComponent(channelId)}`,
+      { cache: 'no-store' }
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.channelId !== state.activeText) return; // user moved on
+    renderHistory(data.messages || []);
+  } catch (_) { /* transient — the live stream still delivers new messages */ }
 }
 
 function renderHistory(messages) {
@@ -1135,6 +1301,7 @@ function renderHistory(messages) {
 
   let last = null;
   for (const msg of messages) {
+    if (msg && msg.id != null) markMessageSeen(msg.id);
     ensureDayDivider(wrap, msg.ts);
     const node = buildMessage(msg, last);
     wrap.appendChild(node);
@@ -1999,6 +2166,7 @@ document.addEventListener('keydown', (e) => {
     closeJoinModal();
     closeAddServer();
     closeInvite();
+    $('password-overlay').classList.add('hidden');
     emojiPicker.classList.add('hidden');
   }
 });
@@ -2010,3 +2178,6 @@ try {
 } catch (_) {}
 setAuthMode('login');
 updateControls();
+
+// keep presence fresh on the backend (its 90s sweep drops silent clients)
+setInterval(() => { if (socket.connected) socket.emit('heartbeat', {}); }, 25000);

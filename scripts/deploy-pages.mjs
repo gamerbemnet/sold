@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 /**
- * Deploy the Sold UI + proxy worker to Cloudflare Pages.
+ * Deploy the Sold UI to Cloudflare Pages (static-only).
  *
  * Replicates what `wrangler pages deploy` does against the Pages API, without
  * needing wrangler/npm:
  *   1. fetch an upload-token JWT for the project
  *   2. hash each asset with wrangler's hashFile: BLAKE3(base64(content) + ext)[0:32]
  *   3. /pages/assets/check-missing -> upload -> upsert-hashes
- *   4. POST the deployment (manifest + branch + _worker.bundle)
- *   5. set the ORIGIN env var that _worker.js uses to reach the origin server
+ *   4. POST the deployment (manifest + branch)
+ *
+ * No _worker.js is deployed: the client talks directly to the Cloudflare
+ * Worker backend (sold-backend.<subdomain>.workers.dev) with CORS enabled,
+ * so Pages only serves static assets. The old ORIGIN proxy env var is no
+ * longer used (a best-effort attempt to clear it is made, never fatal).
  *
  * Usage:
  *   CF_TOKEN=<pages api token> \
  *   CF_ACCOUNT=<account id> \
  *   CF_PROJECT=soldchats \
- *   ORIGIN=https://<current-tunnel-url> \
  *   node scripts/deploy-pages.mjs
  *
  * The token is only read from the environment; it is never written to disk.
@@ -34,11 +37,9 @@ const API = 'https://api.cloudflare.com/client/v4';
 const CF_TOKEN = process.env.CF_TOKEN;
 const CF_ACCOUNT = process.env.CF_ACCOUNT;
 const CF_PROJECT = process.env.CF_PROJECT || 'soldchats';
-const ORIGIN = (process.env.ORIGIN || '').replace(/\/+$/, '');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ASSET_DIR = path.join(ROOT, 'public');          // the live UI source
-const WORKER_PATH = path.join(ROOT, 'pages-build', '_worker.js'); // Pages proxy worker
 const BRANCH = 'main';
 
 const CONTENT_TYPES = {
@@ -73,7 +74,6 @@ async function api(url, { token = CF_TOKEN, ...init } = {}) {
 async function main() {
   if (!CF_TOKEN) fail('CF_TOKEN is not set');
   if (!CF_ACCOUNT) fail('CF_ACCOUNT is not set');
-  if (!ORIGIN) fail('ORIGIN is not set (the public origin URL, e.g. the cloudflared tunnel)');
 
   await b3.load();
 
@@ -91,8 +91,6 @@ async function main() {
     return { name, content, hash, contentType: CONTENT_TYPES[`.${ext}`] || 'application/octet-stream' };
   });
   console.log(`assets: ${files.map((f) => `${f.name}(${f.hash.slice(0, 8)})`).join(' ')}`);
-
-  const workerSrc = readFileSync(WORKER_PATH, 'utf8');
 
   /* ---- 2. upload-token JWT ---- */
   const tok = await api(`${API}/accounts/${CF_ACCOUNT}/pages/projects/${CF_PROJECT}/upload-token`);
@@ -126,51 +124,27 @@ async function main() {
     method: 'POST', headers: jwtHeaders, body: JSON.stringify({ hashes }),
   }).catch(() => {}); // non-fatal: only speeds up future deploys
 
-  /* ---- 4. set the ORIGIN env var (verified) ---- */
-  if (ORIGIN) {
-    // Pages env_vars values are {type, value} objects, nested under
-    // deployment_configs.<environment>
-    const attempts = [
-      { deployment_configs: { production: { env_vars: { ORIGIN: { type: 'plain_text', value: ORIGIN } } } } },
-      { deployment_configs: {
-          production: { env_vars: { ORIGIN: { type: 'plain_text', value: ORIGIN } } },
-          preview: { env_vars: { ORIGIN: { type: 'plain_text', value: ORIGIN } } },
-      } },
-    ];
-    let set = false;
-    for (const body of attempts) {
-      // raw fetch: a rejected shape must fall through to the next attempt,
-      // not abort the deploy
-      try {
-        const res = await fetch(`${API}/accounts/${CF_ACCOUNT}/pages/projects/${CF_PROJECT}`, {
-          method: 'PATCH',
-          headers: { Authorization: `Bearer ${CF_TOKEN}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) continue;
-      } catch { continue; }
-      const check = await api(`${API}/accounts/${CF_ACCOUNT}/pages/projects/${CF_PROJECT}`);
-      const current = check.result?.deployment_configs?.production?.env_vars?.ORIGIN;
-      const currentValue = typeof current === 'object' ? current?.value : current;
-      if (currentValue === ORIGIN) { set = true; break; }
-    }
-    console.log(set ? `ORIGIN env set: ${ORIGIN}` : 'WARN  could not verify ORIGIN env var — check it in the dashboard');
+  /* ---- 4. best-effort: clear the stale ORIGIN env var (unused now) ---- */
+  try {
+    await fetch(`${API}/accounts/${CF_ACCOUNT}/pages/projects/${CF_PROJECT}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${CF_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deployment_configs: {
+        production: { env_vars: { ORIGIN: null } },
+        preview: { env_vars: { ORIGIN: null } },
+      } }),
+    });
+    console.log('ORIGIN env clear requested (unused by static deploy)');
+  } catch {
+    console.log('WARN  could not clear ORIGIN env var — it is unused, safe to ignore');
   }
 
-  /* ---- 5. create the deployment ---- */
+  /* ---- 5. create the deployment (static-only, no _worker.bundle) ---- */
   const form = new FormData();
   const manifest = {};
   for (const f of files) manifest[`/${f.name}`] = f.hash;
   form.set('manifest', JSON.stringify(manifest));
   form.set('branch', BRANCH);
-
-  // _worker.bundle is itself a multipart body: metadata + the ESM module,
-  // exactly how wrangler packages an advanced-mode _worker.js
-  const inner = new FormData();
-  inner.set('metadata', JSON.stringify({ main_module: '_worker.js' }));
-  inner.set('_worker.js', new Blob([workerSrc], { type: 'application/javascript+module' }), '_worker.js');
-  const innerBlob = await new Response(inner).blob();
-  form.set('_worker.bundle', innerBlob, '_worker.bundle');
 
   const dep = await api(`${API}/accounts/${CF_ACCOUNT}/pages/projects/${CF_PROJECT}/deployments`, {
     method: 'POST', body: form,
